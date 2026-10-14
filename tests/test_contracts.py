@@ -152,3 +152,10 @@ def test_foreign_mentions_mask_own_name_and_report_path():
     assert foreign_mentions(output, [{"name": "测试", "path": "/x/@测试"}], ["测试号"]) == []
     hits = foreign_mentions(output, [{"name": "测试号一", "path": "/x/@测试号一"}], ["测试号"])
     assert hits == [("$.a.b[0]", "测…一")]
+
+
+def test_evidence_problems_name_the_candidate_once():
+    output = candidates_output("original", ["data:inputs/strategy-positioning.md"])
+    problems = validate_output(IDEATION, output, Context(params={"method": "original"}, resolver=Resolver()))
+    evidence = [p for p in problems if p.startswith("[证据]")]
+    assert len(evidence) == 3 and "idea-candidates[0].candidates[1]" in evidence[1]

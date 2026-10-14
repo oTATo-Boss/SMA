@@ -110,8 +110,24 @@ def validate_output(outputs: list[OutputSpec], output: dict, ctx: Context) -> li
         for i, content in enumerate(items):
             where = f"{artifact_type}[{i}]"
             problems += [f"{where} {p}" for p in validate_content(artifact_type, content, ctx)]
-            problems += [f"[证据] {p}" for p in evidence_errors(collect_refs(content), ctx, where)]
-    return problems
+            for location, ref in located_refs(content, where):
+                problems += [f"[证据] {p}" for p in evidence_errors([ref], ctx, location)]
+    return list(dict.fromkeys(problems))      # 同一个问题只报一次
+
+
+def located_refs(content, path: str) -> list[tuple[str, str]]:
+    """内容里所有 evidence_refs 的值和它们的位置，例如 ("idea-candidates[0].candidates[2]", "lib:…")。"""
+    found: list[tuple[str, str]] = []
+    if isinstance(content, dict):
+        for key, value in content.items():
+            if key == "evidence_refs" and isinstance(value, list):
+                found += [(path, v) for v in value if isinstance(v, str)]
+            else:
+                found += located_refs(value, f"{path}.{key}")
+    elif isinstance(content, list):
+        for i, item in enumerate(content):
+            found += located_refs(item, f"{path}[{i}]")
+    return found
 
 
 def collect_refs(content) -> list[str]:

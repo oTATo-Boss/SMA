@@ -236,7 +236,8 @@ def runs_list(limit: int = typer.Option(20, "--limit", "-n"), account: Path = AC
 
 
 @runs_app.command("show")
-def runs_show(run_id: str, step: str = typer.Option(None, "--step", "-s", help="只看一个步骤"), account: Path = ACCOUNT) -> None:
+def runs_show(run_id: str, step: str = typer.Option(None, "--step", "-s", help="只看一个步骤，例如 merge 或 research-viral"),
+              account: Path = ACCOUNT) -> None:
     """一次运行的步骤、耗时、用量和产物。"""
     ws = _workspace(account)
     run = ws.db.get_run(run_id)
@@ -271,7 +272,10 @@ def runs_show(run_id: str, step: str = typer.Option(None, "--step", "-s", help="
 
 
 def _show_step(ws: Workspace, run_id: str, step_id: str) -> None:
-    row = ws.db.get_step(run_id, step_id)
+    # 也接受 research-viral 这种写法：zsh 里不加引号的 research[viral] 会被当成通配符
+    row = next((r for r in ws.db.get_steps(run_id) if step_id in {r["step_id"], r["step_id"].replace("[", "-").replace("]", "")}), None)
+    if row is not None:
+        step_id = row["step_id"]
     if row is None:
         console.print(f"[red]这次运行里没有步骤 {escape(step_id)}[/]")
         raise typer.Exit(2)

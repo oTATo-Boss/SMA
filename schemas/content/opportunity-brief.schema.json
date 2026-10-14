@@ -34,7 +34,7 @@
             "items": {
               "type": "string"
             },
-            "description": "依据：ref:<本次条目代号>、lib:<爆款库条目 id>、data:<工作区数据路径> 或公开链接"
+            "description": "依据，只能是：ref:<本次爆款条目的代号>；本次搜索或打开过的网页链接；data:<本人资料路径>（只用任务里“本人提供的资料”列出的文件）。定位、规则和 inputs/ 里的文件说明的是账号，不是依据"
           },
           "audience_signal": {
             "type": "string",

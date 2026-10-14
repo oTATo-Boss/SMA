@@ -76,7 +76,7 @@
             "items": {
               "type": "string"
             },
-            "description": "依据：lib:<爆款库条目 id>、data:<工作区数据路径> 或公开链接"
+            "description": "依据，只能是：lib:<爆款条目的 key>；输入里出现过的公开链接；data:<本人资料路径>（只用任务里“本人提供的资料”列出的文件）。定位、规则和 inputs/ 里的文件说明的是账号，不是依据"
           },
           "borrowed_mechanism": {
             "type": "string",

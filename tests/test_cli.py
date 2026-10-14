@@ -40,6 +40,8 @@ def test_account_strategy_run_show(tmp_path, monkeypatch):
     assert shown.exit_code == 0 and "ideation[original]" in shown.output and "用量合计" in shown.output
     step = runner.invoke(cli.app, ["runs", "show", run_id, "--step", "merge", "--account", str(root)])
     assert "opportunity-brief" in step.output
+    slug = runner.invoke(cli.app, ["runs", "show", run_id, "--step", "research-viral", "--account", str(root)])
+    assert slug.exit_code == 0 and "research[viral]" in slug.output
 
     accounts = runner.invoke(cli.app, ["account", "list"])
     assert "演示号" in accounts.output

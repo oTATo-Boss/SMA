@@ -1,6 +1,6 @@
 id: creative-director
 name: 创意总监
-version: 0.1.0
+version: 0.2.0
 description: 按指定的一种创意方法，基于机会简报和爆款条目，独立产出 3–4 个机制不同的创意候选
 kind: worker
 inputs:
