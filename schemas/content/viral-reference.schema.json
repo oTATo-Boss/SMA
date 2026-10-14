@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/viral-reference",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "key",
+    "platform",
+    "url",
+    "author",
+    "title",
+    "published_at",
+    "viewed_at",
+    "metrics",
+    "baseline",
+    "outlier_ratio",
+    "media_reviewed",
+    "observed",
+    "inferred",
+    "transferable"
+  ],
+  "properties": {
+    "key": {
+      "type": "string",
+      "description": "本次输出里的短代号，例如 r1；机会简报用 ref:r1 引用它"
+    },
+    "platform": {
+      "type": "string",
+      "description": "平台名，例如 小红书、抖音"
+    },
+    "url": {
+      "type": "string",
+      "description": "原始链接"
+    },
+    "author": {
+      "type": "string",
+      "description": "作者或账号名"
+    },
+    "title": {
+      "type": "string",
+      "description": "标题或第一句文案"
+    },
+    "published_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "发布时间，看不到写 null"
+    },
+    "viewed_at": {
+      "type": "string",
+      "description": "查看时间，北京时间 YYYY-MM-DD HH:MM"
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "value_text",
+          "value_number"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "平台上的指标原名"
+          },
+          "value_text": {
+            "type": "string",
+            "description": "看到的原文，例如 1.2万"
+          },
+          "value_number": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "换算成数字，换算不了写 null"
+          }
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "description",
+        "median",
+        "sample_size"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "作者近期同类作品的常态怎么算的"
+        },
+        "median": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "近期同类作品互动的中位数"
+        },
+        "sample_size": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "算中位数用了几条"
+        }
+      }
+    },
+    "outlier_ratio": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "作品互动 ÷ 作者常态中位数；算不出写 null"
+    },
+    "media_reviewed": {
+      "type": "boolean",
+      "description": "真的看过画面、听过声音才写 true"
+    },
+    "observed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "只写看到的事实和数据"
+    },
+    "inferred": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "对成功原因的推测"
+    },
+    "transferable": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "能迁移到新作品的方法，停在机制层面"
+    }
+  },
+  "description": "一条爆款的证据和拆解"
+}

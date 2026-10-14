@@ -1,0 +1,28 @@
+id: creative-director
+name: 创意总监
+version: 0.1.0
+description: 按指定的一种创意方法，基于机会简报和爆款条目，独立产出 3–4 个机制不同的创意候选
+kind: worker
+inputs:
+  - { type: strategy, required: true }
+  - { type: opportunity-brief, required: true }
+  - { type: viral-reference, required: false, many: true }
+outputs:
+  - { type: idea-candidates }
+engine:
+  prefer: [codex]
+model:
+  family: any
+  tier: strong
+reasoning: high
+sandbox: read-only
+network: none
+skills:
+  - { name: creative-director, required: false }
+  - { name: storytelling-hooks, required: false }
+  - { name: content-planning, required: false }
+knowledge:
+  - knowledge/创意方法.md
+memory:
+  read: true
+limits: { timeout_s: 1200, max_attempts: 3, max_output_kb: 128 }

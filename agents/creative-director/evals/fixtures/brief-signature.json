@@ -1,0 +1,27 @@
+{
+ "opportunities": [
+  {
+   "topic": "送上门的温暖：每集一个小意外",
+   "why_now": "动画系列近期 7.6 倍",
+   "evidence_refs": [
+    "lib:dy-20261013-01"
+   ],
+   "audience_signal": "评论在点下一集的目的地",
+   "mechanism_hints": [
+    "每集一个目的地 + 一个小意外 + 暖心收尾"
+   ]
+  },
+  {
+   "topic": "便利店夜班的小确幸",
+   "why_now": "生活号同题材近期 3.2 倍",
+   "evidence_refs": [
+    "lib:dy-20261013-02"
+   ],
+   "audience_signal": "评论'想去这样的店'",
+   "mechanism_hints": [
+    "日常流程 + 一个温柔的意外"
+   ]
+  }
+ ],
+ "gaps": []
+}

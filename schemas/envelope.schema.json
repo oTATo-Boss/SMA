@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:envelope",
+  "description": "存档用的产物信封：元数据由编排层填写，content 按各类型的内容 Schema 校验",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact",
+    "schema_version",
+    "id",
+    "run_id",
+    "step_id",
+    "producer",
+    "created_at",
+    "inputs",
+    "evidence_refs",
+    "content"
+  ],
+  "properties": {
+    "artifact": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "id": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "step_id": {
+      "type": "string"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "version",
+        "engine",
+        "model"
+      ],
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "engine": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ref",
+          "sha256"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "content": {
+      "type": "object"
+    }
+  }
+}

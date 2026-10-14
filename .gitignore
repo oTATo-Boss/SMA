@@ -9,3 +9,5 @@ build/
 .env
 .env.*
 .sma/
+.omc/
+.ruff_cache/

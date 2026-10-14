@@ -186,7 +186,7 @@ def probe_isolation(codex: str, out: Path, name: str, extra: list[str], home: Pa
     env = {**os.environ, **({"CODEX_HOME": str(home)} if home else {})}
     start = time.time()
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env, stdin=subprocess.DEVNULL)
-    usage = [json.loads(l).get("usage") for l in proc.stdout.splitlines() if l.startswith("{") and '"turn.completed"' in l]
+    usage = [json.loads(line).get("usage") for line in proc.stdout.splitlines() if line.startswith("{") and '"turn.completed"' in line]
     result = {"name": name, "exit": proc.returncode, "seconds": round(time.time() - start, 1), "usage": usage,
               "sibling_exists": sibling.exists(), "far_exists": far.exists(),
               "output": json.loads((base / "output.json").read_text()) if (base / "output.json").exists() else proc.stderr[-800:]}

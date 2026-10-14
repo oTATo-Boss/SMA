@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/blocking-report",
+  "description": "阻塞报告：编排层生成",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reason",
+    "done",
+    "needed",
+    "resume"
+  ],
+  "properties": {
+    "reason": {
+      "enum": [
+        "positioning-unconfirmed",
+        "needs-login",
+        "needs-key",
+        "needs-authorization",
+        "rounds-exhausted",
+        "compliance-doubt",
+        "step-failed"
+      ]
+    },
+    "done": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "needed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "resume": {
+      "type": "string"
+    }
+  }
+}

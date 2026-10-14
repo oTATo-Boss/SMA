@@ -1,0 +1,51 @@
+# 一句话 → 调研 → 3 路创意（设计 03 第 9 节）。
+# M1 版本：前提检查由编排层在每次执行（含续跑）时做；规划、盲评、导演留到 M2。
+id: ideate
+version: 1
+description: 一句话任务：并行调研本赛道和相邻赛道，合并成机会简报，再用 3 种方法并行出创意候选
+preconditions: [positioning_confirmed]
+
+steps:
+  research:
+    agent: market-intel
+    foreach:
+      param: lane
+      values:
+        - id: viral
+          name: 本赛道爆款
+          focus: 在账号定位的赛道和对标账号里，找近期明显超过作者常态的作品
+        - id: adjacent
+          name: 相邻赛道与热点
+          focus: 在相邻甚至无关的赛道、近期热点和流行模板里，找能迁移到本账号的机制
+    min_success: 1
+    inputs:
+      - { from: workspace, type: strategy }
+      - { from: workspace, type: benchmarks, required: false }
+      - { from: workspace, type: data-files, required: false }
+
+  merge:
+    code: merge_research
+    needs: [research]
+    inputs:
+      - { from: research, type: viral-reference, required: false }
+      - { from: research, type: opportunity-brief }
+    outputs:
+      - { type: opportunity-brief }
+      - { type: viral-reference, many: true }
+
+  ideation:
+    agent: creative-director
+    needs: [merge]
+    foreach:
+      param: method
+      values:
+        - { id: mechanism-borrow, name: 同赛道机制借鉴 }
+        - { id: cross-domain, name: 跨赛道迁移 }
+        - { id: original, name: 原创发散 }
+    params:
+      candidates_range: [3, 4]
+    min_success: 2
+    inputs:
+      - { from: workspace, type: strategy }
+      - { from: merge, type: opportunity-brief }
+      - { from: merge, type: viral-reference, required: false, select: top_by_outlier, limit: 12 }

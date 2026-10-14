@@ -1,0 +1,141 @@
+[
+ {
+  "key": "dy-20261010-01",
+  "platform": "抖音",
+  "url": "https://example.com/dy/7420000000000000101",
+  "author": "示例美食号A",
+  "title": "一碗泡面能加到多离谱",
+  "published_at": "2026-10-08",
+  "viewed_at": "2026-10-14 21:30",
+  "metrics": [
+   {
+    "name": "点赞",
+    "value_text": "38.2万",
+    "value_number": 382000
+   }
+  ],
+  "baseline": {
+   "description": "作者近 15 条同类作品点赞的中位数",
+   "median": 21000,
+   "sample_size": 15
+  },
+  "outlier_ratio": 18.2,
+  "media_reviewed": true,
+  "observed": [
+   "开头是一碗普通泡面，旁白说'今天给它加点料'",
+   "每 3 秒加一样更贵的食材，节奏越来越快",
+   "结尾是满桌菜，主角只吃了一口泡面",
+   "评论高频词：'再加一个''笑死'"
+  ],
+  "inferred": [
+   "逐步升级让观众一直想知道下一步加什么",
+   "结尾回到最初的泡面形成反差"
+  ],
+  "transferable": [
+   "预期建立 → 逐步升级 → 失控 → 反转收尾"
+  ]
+ },
+ {
+  "key": "xhs-20261011-01",
+  "platform": "小红书",
+  "url": "https://example.com/xhs/66f0000000000000000201",
+  "author": "示例治愈号B",
+  "title": "深夜小店老板没说一句话",
+  "published_at": "2026-10-08",
+  "viewed_at": "2026-10-14 21:30",
+  "metrics": [
+   {
+    "name": "点赞",
+    "value_text": "6.1万",
+    "value_number": 61000
+   }
+  ],
+  "baseline": {
+   "description": "作者近 12 条同类作品点赞的中位数",
+   "median": 4200,
+   "sample_size": 12
+  },
+  "outlier_ratio": 14.5,
+  "media_reviewed": true,
+  "observed": [
+   "顾客失恋后深夜进店，老板没问原因，默默端出一碗热汤",
+   "全片没有对白，只有环境声和字幕",
+   "结尾镜头停在空碗和窗外的雨",
+   "评论：'看哭了''想要这样的老板'"
+  ],
+  "inferred": [
+   "不说破的照顾让观众代入自己的深夜情绪"
+  ],
+  "transferable": [
+   "顾客带着情绪进门 → 不说破的照顾 → 安静的回报"
+  ]
+ },
+ {
+  "key": "dy-20261012-02",
+  "platform": "抖音",
+  "url": "https://example.com/dy/7420000000000000303",
+  "author": "示例萌宠号C",
+  "title": "我家猫以为自己在上班",
+  "published_at": "2026-10-08",
+  "viewed_at": "2026-10-14 21:30",
+  "metrics": [
+   {
+    "name": "点赞",
+    "value_text": "12.4万",
+    "value_number": 124000
+   }
+  ],
+  "baseline": {
+   "description": "作者近 20 条同类作品点赞的中位数",
+   "median": 18000,
+   "sample_size": 20
+  },
+  "outlier_ratio": 6.9,
+  "media_reviewed": true,
+  "observed": [
+   "监控视角：猫坐在电脑前，爪子按在键盘上",
+   "字幕把猫的动作翻译成打工人的台词",
+   "评论在接力写'猫的工位日记'"
+  ],
+  "inferred": [
+   "身份错位：动物认真做人类的工作，观众在里面看到自己"
+  ],
+  "transferable": [
+   "身份错位：动物一本正经地做人类的工作"
+  ]
+ },
+ {
+  "key": "xhs-20261012-03",
+  "platform": "小红书",
+  "url": "https://example.com/xhs/66f0000000000000000404",
+  "author": "示例街拍号D",
+  "title": "雨夜便利店，一个镜头 15 秒",
+  "published_at": "2026-10-08",
+  "viewed_at": "2026-10-14 21:30",
+  "metrics": [
+   {
+    "name": "收藏",
+    "value_text": "2.3万",
+    "value_number": 23000
+   }
+  ],
+  "baseline": {
+   "description": "作者近 11 条同类作品收藏的中位数",
+   "median": 5600,
+   "sample_size": 11
+  },
+  "outlier_ratio": 4.1,
+  "media_reviewed": true,
+  "observed": [
+   "固定机位拍雨夜便利店门口，延时 15 秒",
+   "最后一秒店里的灯牌换了一个字",
+   "评论在猜换的是什么字"
+  ],
+  "inferred": [
+   "约束形式本身就是看点，最后的小变化制造讨论"
+  ],
+  "transferable": [
+   "一个固定机位 + 时间流逝 + 最后一个小变化"
+  ]
+ }
+]

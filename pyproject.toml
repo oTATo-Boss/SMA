@@ -34,3 +34,9 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+# B008：typer 的参数默认值就是这种写法；RUF001–003：中文全角标点不算歧义字符；
+# E501：中文按两个字符宽计算，行宽交给人工把握
+ignore = ["B008", "E501", "RUF001", "RUF002", "RUF003"]

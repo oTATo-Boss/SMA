@@ -1,0 +1,69 @@
+[
+ {
+  "key": "dy-20261013-01",
+  "platform": "抖音",
+  "url": "https://example.com/dy/7420000000000000505",
+  "author": "示例动画号E",
+  "title": "团团来送餐啦·第 37 集",
+  "published_at": "2026-10-08",
+  "viewed_at": "2026-10-14 21:30",
+  "metrics": [
+   {
+    "name": "点赞",
+    "value_text": "52.0万",
+    "value_number": 520000
+   }
+  ],
+  "baseline": {
+   "description": "作者近 15 条同类作品点赞的中位数",
+   "median": 68000,
+   "sample_size": 15
+  },
+  "outlier_ratio": 7.6,
+  "media_reviewed": true,
+  "observed": [
+   "固定角色：戴黄色头盔的熊猫外卖员「团团」",
+   "每集开头喊招牌台词「团团来送餐啦」",
+   "每集一个送餐目的地和一个小意外，结尾暖心"
+  ],
+  "inferred": [
+   "固定角色和口号形成系列记忆点"
+  ],
+  "transferable": [
+   "每集一个目的地 + 一个小意外 + 暖心收尾"
+  ]
+ },
+ {
+  "key": "dy-20261013-02",
+  "platform": "抖音",
+  "url": "https://example.com/dy/7420000000000000606",
+  "author": "示例生活号F",
+  "title": "便利店夜班的一个小时",
+  "published_at": "2026-10-08",
+  "viewed_at": "2026-10-14 21:30",
+  "metrics": [
+   {
+    "name": "点赞",
+    "value_text": "4.8万",
+    "value_number": 48000
+   }
+  ],
+  "baseline": {
+   "description": "作者近 13 条同类作品点赞的中位数",
+   "median": 15000,
+   "sample_size": 13
+  },
+  "outlier_ratio": 3.2,
+  "media_reviewed": true,
+  "observed": [
+   "夜班店员整理货架，镜头跟着几位深夜顾客",
+   "结尾店员在门口喂流浪猫"
+  ],
+  "inferred": [
+   "真实的小确幸让人放松"
+  ],
+  "transferable": [
+   "日常流程 + 一个温柔的意外"
+  ]
+ }
+]

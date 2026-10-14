@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/idea-candidates",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "method",
+    "candidates"
+  ],
+  "properties": {
+    "method": {
+      "type": "string",
+      "description": "本次使用的创意方法"
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "one_liner",
+          "hook",
+          "beats",
+          "payoff",
+          "why",
+          "evidence_refs",
+          "borrowed_mechanism",
+          "difference_from_source",
+          "feasibility"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "候选代号，例如 A1"
+          },
+          "one_liner": {
+            "type": "string",
+            "description": "一句话创意"
+          },
+          "hook": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "visual",
+              "line"
+            ],
+            "properties": {
+              "visual": {
+                "type": "string",
+                "description": "前 3 秒的画面"
+              },
+              "line": {
+                "type": "string",
+                "description": "前 3 秒的台词或字幕"
+              }
+            }
+          },
+          "beats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "节拍，按时间顺序"
+          },
+          "payoff": {
+            "type": "string",
+            "description": "结尾回报"
+          },
+          "why": {
+            "type": "string",
+            "description": "为什么会火，引用证据"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "依据：lib:<爆款库条目 id>、data:<工作区数据路径> 或公开链接"
+          },
+          "borrowed_mechanism": {
+            "type": "string",
+            "description": "借的是什么机制"
+          },
+          "difference_from_source": {
+            "type": "string",
+            "description": "和原作差在哪"
+          },
+          "feasibility": {
+            "type": "string",
+            "description": "制作可行性：镜头数、哪些要生成、难点"
+          }
+        }
+      }
+    }
+  },
+  "description": "一种方法下的创意候选"
+}

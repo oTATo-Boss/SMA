@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/opportunity-brief",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "opportunities",
+    "gaps"
+  ],
+  "properties": {
+    "opportunities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topic",
+          "why_now",
+          "evidence_refs",
+          "audience_signal",
+          "mechanism_hints"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "机会的主题"
+          },
+          "why_now": {
+            "type": "string",
+            "description": "为什么是现在"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "依据：ref:<本次条目代号>、lib:<爆款库条目 id>、data:<工作区数据路径> 或公开链接"
+          },
+          "audience_signal": {
+            "type": "string",
+            "description": "观众信号，例如评论里的需求"
+          },
+          "mechanism_hints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "可借的机制"
+          }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "缺的证据或数据"
+    }
+  },
+  "description": "现在值得做什么"
+}

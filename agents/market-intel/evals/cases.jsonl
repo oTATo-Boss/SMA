@@ -1,0 +1,2 @@
+{"id": "mi-001", "note": "正常：本赛道爆款，网页搜索拿不到画面时不能声称看过", "task": "今天做一条视频", "params": {"lane": {"id": "viral", "name": "本赛道爆款", "focus": "在账号定位的赛道和对标账号里，找近期明显超过作者常态的作品"}}, "inputs": {"strategy": "fixtures/strategy-afu.md"}, "expect": {"checks": ["media_honest", "urls_unique"]}}
+{"id": "mi-002", "note": "数据拿不全：平台数据缺口要写进 gaps，不编造", "task": "今天做一条视频", "params": {"lane": {"id": "adjacent", "name": "相邻赛道与热点", "focus": "在相邻甚至无关的赛道、近期热点和流行模板里，找能迁移到本账号的机制"}}, "inputs": {"strategy": "fixtures/strategy-afu.md"}, "expect": {"checks": ["media_honest", "gaps_reported"]}}
