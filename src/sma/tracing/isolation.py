@@ -27,12 +27,41 @@ def compare(before: dict, after: dict) -> dict[str, list[str]]:
             "改动": sorted(k for k in set(before) & set(after) if before[k] != after[k])}
 
 
-def foreign_mentions(text: str, others: list[dict], allowed: list[str]) -> list[str]:
-    """text 里出现的其他账号名称或路径。others 来自账号登记：[{name, path}]。"""
-    found = []
-    allowed_set = set(allowed)
+def _spans(text: str, term: str) -> list[tuple[int, int]]:
+    spans, start = [], text.find(term)
+    while start >= 0:
+        spans.append((start, start + len(term)))
+        start = text.find(term, start + 1)
+    return spans
+
+
+def mask_term(term: str) -> str:
+    """提示里只露出首尾字，不把其他账号的名称写进本账号的记录。"""
+    if "/" in term or "\\" in term:
+        return "某个账号的路径"
+    return f"{term[0]}…{term[-1]}" if len(term) >= 3 else f"{term[0]}…"
+
+
+def foreign_mentions(data, others: list[dict], allowed: list[str], path: str = "$") -> list[tuple[str, str]]:
+    """data（产物 JSON）里出现的其他账号名称或路径，返回 [(JSON 路径, 遮住的名称)]。
+
+    others 来自账号登记：[{name, path}]。被允许的词（包括本账号自己的名字）覆盖住的位置不算，
+    例如本账号叫"测试号"、另一个账号叫"测试"时，"测试号"不会误报；反过来另一个账号更长时照样报出来。
+    """
+    if isinstance(data, dict):
+        return [hit for key, value in data.items() for hit in foreign_mentions(value, others, allowed, f"{path}.{key}")]
+    if isinstance(data, list):
+        return [hit for i, value in enumerate(data) for hit in foreign_mentions(value, others, allowed, f"{path}[{i}]")]
+    if not isinstance(data, str):
+        return []
+    covered = [span for term in allowed if term for span in _spans(data, term)]
+    hits = []
     for account in others:
         for term in (account.get("name", ""), account.get("path", "")):
-            if len(term) >= 2 and term not in allowed_set and term in text:
-                found.append(term)
-    return sorted(set(found))
+            if len(term) < 2 or term in allowed:
+                continue
+            for start, end in _spans(data, term):
+                if not any(a <= start and end <= b for a, b in covered):
+                    hits.append((path, mask_term(term)))
+                    break
+    return hits

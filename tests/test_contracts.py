@@ -9,9 +9,11 @@ from sma.contracts.envelope import Producer, make_envelope
 from sma.contracts.schemas import OutputSpec, content_schema, envelope_schema, output_schema, strict_problems
 from sma.contracts.validate import (
     Context,
+    collect_urls,
     evidence_errors,
     hash_error,
     schema_errors,
+    unseen_urls,
     validate_content,
     validate_output,
 )
@@ -124,3 +126,29 @@ def test_envelope_is_filled_by_code():
     assert envelope["id"] == "r-1/research-viral/opportunity-brief.v1"
     assert envelope["evidence_refs"] == ["ref:r1", "ref:r2"]
     json.dumps(envelope, ensure_ascii=False)
+
+
+def test_collect_and_check_seen_urls():
+    output = research_output("viral")
+    output["opportunity_brief"]["opportunities"][0]["evidence_refs"].append("https://www.douyin.com/video/7630451277697245163")
+    urls = collect_urls(output)
+    assert urls == ["https://example.com/v/viral-1", "https://example.com/v/shared?from=search", "https://www.douyin.com/video/7630451277697245163"]
+    corpus = ('{"url": "https://example.com/v/viral-1"} 列表里看到 example.com/v/shared/ '
+              '{"url": "https://www.douyin.com/user/abc?modal_id=7630451277697245163"}')
+    assert unseen_urls(urls, corpus) == []
+    assert unseen_urls(["https://www.douyin.com/video/7699999999999999999"], corpus) == ["https://www.douyin.com/video/7699999999999999999"]
+    assert unseen_urls(["https://other.com/video/7630451277697245163"], corpus) == ["https://other.com/video/7630451277697245163"]
+
+
+def test_duplicate_viral_keys_are_rejected():
+    output = research_output("viral")
+    output["viral_references"][1]["key"] = "r1"
+    assert any("key 重复" in p for p in validate_output(RESEARCH, output, Context()))
+
+
+def test_foreign_mentions_mask_own_name_and_report_path():
+    from sma.tracing.isolation import foreign_mentions
+    output = {"a": {"b": ["阿福和测试号一起"]}}
+    assert foreign_mentions(output, [{"name": "测试", "path": "/x/@测试"}], ["测试号"]) == []
+    hits = foreign_mentions(output, [{"name": "测试号一", "path": "/x/@测试号一"}], ["测试号"])
+    assert hits == [("$.a.b[0]", "测…一")]

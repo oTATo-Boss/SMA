@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import signal
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from sma.doctor import Item, check_account, check_environment
 from sma.engines.base import Engine
 from sma.engines.codex import CodexEngine
 from sma.evals.runner import compare_batches, eval_db, run_agent_eval
-from sma.orchestrator.runner import Runner
+from sma.orchestrator.runner import RunBusy, Runner
 from sma.orchestrator.workflow import expand, parse_workflow
 from sma.packages.loader import lint_package, list_packages
 from sma.workspace import registry
@@ -169,16 +170,22 @@ def _printer(event: dict) -> None:
             console.print(f"  [yellow]运行期间工作区有改动：{escape(change)}[/]")
 
 
-def _runner(ws: Workspace) -> Runner:
-    runner = Runner(ws, engines(), on_event=_printer)
+def _on_stop(cancel: threading.Event, message: str) -> None:
+    """Ctrl-C、kill、关掉终端都先结束引擎进程再退出（引擎在单独的进程组里，不会自己收到信号）。"""
 
     def stop(signum, frame):
-        if runner.cancel.is_set():
+        if cancel.is_set():
             raise KeyboardInterrupt
-        console.print("[yellow]正在停止：结束引擎进程，已完成的步骤会保留，之后可以续跑[/]")
-        runner.cancel.set()
+        console.print(f"[yellow]{message}[/]")
+        cancel.set()
 
-    signal.signal(signal.SIGINT, stop)
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, stop)
+
+
+def _runner(ws: Workspace) -> Runner:
+    runner = Runner(ws, engines(), on_event=_printer)
+    _on_stop(runner.cancel, "正在停止：结束引擎进程，已完成的步骤会保留，之后可以续跑")
     return runner
 
 
@@ -207,7 +214,11 @@ def run_command(task: str = typer.Argument(..., help="本人的一句话任务")
     """一句话开工：按流程自主跑完，中途不找你确认。"""
     ws = _workspace(account)
     runner = _runner(ws)
-    run_id = runner.start(workflow, task)
+    try:
+        run_id = runner.start(workflow, task)
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{escape(str(exc))}[/]")
+        raise typer.Exit(2) from exc
     status = runner.execute(run_id)
     _after_run(ws, run_id, status)
     raise typer.Exit(0 if status == "succeeded" else 1)
@@ -287,7 +298,7 @@ def runs_resume(run_id: str, account: Path = ACCOUNT) -> None:
     runner = _runner(ws)
     try:
         status = runner.resume(run_id)
-    except ValueError as exc:
+    except (ValueError, RunBusy) as exc:
         console.print(f"[red]{escape(str(exc))}[/]")
         raise typer.Exit(2) from exc
     _after_run(ws, run_id, status)
@@ -338,8 +349,10 @@ def eval_agent(agent_id: str, case: list[str] = typer.Option([], "--case", "-c",
                engine: str = typer.Option(None, "--engine"), model: str = typer.Option(None, "--model", "-m"),
                parallel: int = typer.Option(2, "--parallel", help="同时跑几个用例")) -> None:
     """跑一个包的评测集。"""
-    available = engines()
-    batch = run_agent_eval(agent_id, available, engine=engine, model=model, cases=case or None, parallel=parallel, on_event=_eval_printer)
+    cancel = threading.Event()
+    _on_stop(cancel, "正在停止：结束引擎进程，没开始的用例不再跑")
+    batch = run_agent_eval(agent_id, engines(), engine=engine, model=model, cases=case or None, parallel=parallel,
+                           cancel=cancel, on_event=_eval_printer)
     rows = eval_db().evals(batch)
     passed = sum(r["passed"] for r in rows)
     console.print(f"[bold]{passed}/{len(rows)} 通过[/] · 批次 {batch}")

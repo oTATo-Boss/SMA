@@ -10,8 +10,10 @@ from urllib.parse import urlsplit
 import yaml
 
 from sma.hashing import canonical_json, sha256_file
+from sma.locks import file_lock
 from sma.state.db import StateDB
 from sma.timeutil import now
+from sma.urls import normalize_url
 from sma.workspace.config import AccountConfig, AccountInfo
 
 CONFIG_FILE = "sma.yaml"
@@ -23,22 +25,25 @@ STRATEGY_TEMPLATES = {
     "strategy/facts.md": "# 账号事实\n\n（待填写：本人、品牌、产品和账号的事实。）\n",
 }
 LIBRARY_ID = re.compile(r"[a-z]+-\d{8}-\d{2,}")
-PLATFORM_CODES = {"小红书": "xhs", "抖音": "dy", "快手": "ks", "b站": "bili", "bilibili": "bili", "视频号": "wx", "微博": "wb",
-                  "youtube": "yt", "tiktok": "tt", "instagram": "ig", "x": "x", "twitter": "x"}
+PLATFORM_CODES = {"小红书": "xhs", "抖音": "dy", "快手": "ks", "b站": "bili", "哔哩哔哩": "bili", "bilibili": "bili",
+                  "视频号": "wx", "微信视频号": "wx", "微博": "wb", "youtube": "yt", "tiktok": "tt", "instagram": "ig",
+                  "x": "x", "twitter": "x"}
+DOMAIN_CODES = {"xiaohongshu.com": "xhs", "xhslink.com": "xhs", "douyin.com": "dy", "iesdouyin.com": "dy", "kuaishou.com": "ks",
+                "bilibili.com": "bili", "b23.tv": "bili", "channels.weixin.qq.com": "wx", "weibo.com": "wb", "weibo.cn": "wb",
+                "youtube.com": "yt", "youtu.be": "yt", "tiktok.com": "tt", "instagram.com": "ig", "x.com": "x", "twitter.com": "x"}
 
 
 class WorkspaceError(Exception):
     pass
 
 
-def platform_code(platform: str) -> str:
-    return PLATFORM_CODES.get(platform.strip().lower(), "web")
-
-
-def normalize_url(url: str) -> str:
-    """去重用：协议、主机、路径，去掉查询参数和末尾斜杠（各平台的追踪参数不影响是不是同一条）。"""
-    parts = urlsplit(url.strip())
-    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path.rstrip('/')}"
+def platform_code(platform: str, url: str = "") -> str:
+    """爆款库 id 的平台前缀：先看链接的域名，再看平台名，都认不出用 web。"""
+    host = urlsplit(url).netloc.lower()
+    for domain, code in DOMAIN_CODES.items():
+        if host == domain or host.endswith("." + domain):
+            return code
+    return PLATFORM_CODES.get(platform.strip().lower().replace(" ", ""), "web")
 
 
 class Workspace:
@@ -122,28 +127,44 @@ class Workspace:
         return entries
 
     def add_library_entries(self, references: list[dict], source: str) -> dict[str, str]:
-        """把爆款条目收进爆款库，按链接去重；返回 {条目代号: 爆款库 id}（已有的返回原 id）。"""
-        known = {normalize_url(e["url"]): e["id"] for e in self.library_entries() if e.get("url")}
+        """把爆款条目收进爆款库，按链接去重；返回 {条目代号: 爆款库 id}（已有的返回原 id）。
+
+        加文件锁、用独占方式建文件：同一个工作区里同时有几个进程入库也不会撞号或互相覆盖。
+        """
         mapping: dict[str, str] = {}
         day = now().strftime("%Y%m%d")
-        for ref in references:
-            url = normalize_url(ref["url"])
-            if url in known:
-                mapping[ref["key"]] = known[url]
-                continue
-            prefix = f"{platform_code(ref['platform'])}-{day}-"
-            used = [int(p.stem.rsplit("-", 1)[1]) for p in self.library_dir().glob(f"{prefix}*.json")]
-            entry_id = f"{prefix}{(max(used) + 1 if used else 1):02d}"
-            entry = {"id": entry_id, "source": source, **{k: v for k, v in ref.items() if k != "key"}}
-            (self.library_dir() / f"{entry_id}.json").write_text(canonical_json(entry), encoding="utf-8")
-            known[url] = entry_id
-            mapping[ref["key"]] = entry_id
+        with file_lock(self.library_dir() / ".lock"):
+            known = {normalize_url(e["url"]): e["id"] for e in self.library_entries() if e.get("url")}
+            for ref in references:
+                url = normalize_url(ref["url"])
+                if url in known:
+                    mapping[ref["key"]] = known[url]
+                    continue
+                prefix = f"{platform_code(ref['platform'], ref['url'])}-{day}-"
+                number = re.compile(re.escape(prefix) + r"(\d+)")
+                used = [int(m.group(1)) for p in self.library_dir().glob(f"{prefix}*.json") if (m := number.fullmatch(p.stem))]
+                n = max(used, default=0) + 1
+                while True:
+                    entry_id = f"{prefix}{n:02d}"
+                    entry = {"id": entry_id, "source": source, **{k: v for k, v in ref.items() if k != "key"}}
+                    try:
+                        with open(self.library_dir() / f"{entry_id}.json", "x", encoding="utf-8") as handle:
+                            handle.write(canonical_json(entry))
+                        break
+                    except FileExistsError:
+                        n += 1
+                known[url] = entry_id
+                mapping[ref["key"]] = entry_id
         return mapping
 
     # ---- 数据和运行目录 ----
     def has_data(self, relative_path: str) -> bool:
-        path = (self.root / "data" / relative_path).resolve()
-        return path.is_relative_to(self.root / "data") and path.exists()
+        base = (self.root / "data").resolve()
+        try:
+            path = (base / relative_path).resolve()
+            return path.is_relative_to(base) and path.exists()
+        except (OSError, ValueError):       # 例如路径里有空字符
+            return False
 
     def run_dir(self, run_id: str) -> Path:
         return self.root / "runs" / run_id

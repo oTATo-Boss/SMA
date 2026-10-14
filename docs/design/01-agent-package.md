@@ -106,12 +106,12 @@ limits: { timeout_s: 900, max_attempts: 3 }
 - 不写引擎专属说法和工具调用细节，那是引擎适配层的事。
 - 只按名字引用输入，不写文件系统路径。
 - 红线不在每个包里重复，由编排层统一注入策略摘要（[05](05-tools-and-policy.md) 第 3 节）。
-- 控制长度：指令加预加载的技能、知识，单步上下文的预算在 M1 实测后定。
+- 控制长度：指令加预加载的技能、知识，单步上下文的预算见 [04](04-engines.md) 第 7 节的实测。
 
 ## 5. 技能
 
 - **共享技能按名字引用，不复制。** `sma doctor` 检查本机有没有装；缺必需技能时，该包不可用并报告缺什么。
-- **加载方式由引擎决定。** Codex 从技能根目录自动发现；Claude 通过角色定义里的技能列表加载。两条路径在 M1 实测（[04](04-engines.md) 第 7 节）。
+- **技能由 SMA 注入。** 不依赖引擎自动发现（实测会把本机全部技能的说明注入上下文）：SMA 按名字找到 `SKILL.md`，写进步骤的 `AGENTS.md`，技能目录只读给出（[04](04-engines.md) 第 7 节）。
 - **私有技能放 `skills/`。** 只有本包用、且和 SMA 版本强绑定的方法才放这里。
 - **外部技能统一登记。** 仓库层的 `docs/skills.md` 记录每个外部技能的来源、许可和用到它的包；许可要求署名的（例如 CC BY 4.0）在引用处注明。
 
@@ -158,7 +158,7 @@ sma package export <id> --codex    生成 .codex/agents/<id>.toml
 
 | id | 名称 | kind | 主要输入 | 输出 | 沙箱 | 网络与工具 | 里程碑 |
 |---|---|---|---|---|---|---|---|
-| `market-intel` | 市场研究 | worker | 定位快照、对标库、本账号基线 | `viral-reference`、`opportunity-brief` | step-write | M1 用引擎自带的网页搜索（web）；M2 起改用研究和媒体工具（tools-only） | M1 |
+| `market-intel` | 市场研究 | worker | 定位快照、对标库、本人提供的资料；M2 起加本账号基线 | `viral-reference`、`opportunity-brief` | step-write | M1 用引擎自带的网页搜索（web）；M2 起改用研究和媒体工具（tools-only） | M1 |
 | `creative-director` | 创意总监 | worker | 机会简报、爆款条目、方法参数 | `idea-candidates` | read-only | none | M1 |
 | `creative-critic` | 创意评审 | critic | 机会简报、候选（盲化）、爆款条目 | `idea-review` | read-only | none | M2 |
 | `film-director` | 导演 | worker | 评审结论、选中候选、定位快照 | `production-plan`、`shot-list` | read-only | none | M2 |
@@ -166,6 +166,6 @@ sma package export <id> --codex    生成 .codex/agents/<id>.toml
 | `media-producer` | 素材制作 | worker | 镜头表、固定资产清单 | `asset-manifest` | step-write | tools-only：生成、媒体 | M3 |
 | `post-producer` | 后期 | worker | 镜头表、素材清单、审片意见 | `edit-result`、`copy-package` | step-write | tools-only：媒体 | M3 |
 | `quality-reviewer` | 审片 | critic | 成片、镜头表、评审要求 | `review-report` | read-only | tools-only：媒体 | M3 |
-| `growth-analyst` | 增长分析 | worker | 后台数据、历史运行的依据卡 | `account-baseline`、`experience-update` | read-only | tools-only：研究 | M1（基线）、M4（回流） |
+| `growth-analyst` | 增长分析 | worker | 后台数据、历史运行的依据卡 | `account-baseline`、`experience-update` | read-only | tools-only：研究 | M2（基线）、M4（回流） |
 
 `planner` 只做提议：例如这次研究走哪几个方向、3 路创意各用什么方法。提议由编排层按流程约束校验后采用，不能改变流程本身、上限和策略。

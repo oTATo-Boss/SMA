@@ -5,14 +5,18 @@
 - --ignore-user-config、--ephemeral：不读用户配置、不留会话；
 - 关掉自动技能清单（技能内容由编排层写进 AGENTS.md）；
 - MCP 工具必须设 default_tools_approval_mode="approve"，否则非交互运行时调用被拒；
+- 关掉 Codex 默认开着、但包没有声明的能力：ChatGPT 连接器、插件、浏览器和电脑操作、子 Agent、生图、技能搜索、记忆、钩子；
 - 提供方连不上时 Codex 会一直重连，这里自己计时并识别"等待网络"事件尽早失败。
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import re
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -25,7 +29,14 @@ KNOWN_PATHS = ["/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex
 NETWORK_TO_WEB_SEARCH = {"none": "disabled", "tools-only": "disabled", "web": "cached"}
 SANDBOX = {"read-only": "read-only", "step-write": "workspace-write"}
 RECONNECT_LIMIT = 4
-AUTH_HINTS = ("401", "unauthorized", "not logged in", "codex login", "authentication", "refresh token", "token expired")
+# 实测（docs/spikes/codex-engine.md T10）：不关的话，连接器会把账号里上千个应用工具（含部署、删除这类写操作）带进步骤
+DISABLED_FEATURES = ("apps", "plugins", "remote_plugin", "plugin_sharing", "tool_suggest", "multi_agent", "browser_use",
+                     "browser_use_external", "computer_use", "in_app_browser", "image_generation", "skill_search",
+                     "skill_mcp_dependency_install", "memories", "hooks", "goals")
+SEEN_ITEMS = {"web_search", "command_execution", "mcp_tool_call"}
+# 像登录失效的错误：命中后再用 codex login status 确认，确实没登录才阻塞，免得把普通错误当成登录问题
+AUTH_PATTERN = re.compile(r"\b401\b|unauthorized|not logged in|codex login|refresh token|token (?:has )?expired|"
+                          r"authentication (?:failed|required)", re.I)
 
 
 def _toml_str(value: str) -> str:
@@ -99,6 +110,8 @@ class CodexEngine:
                "-C", str(request.attempt_dir), "-s", SANDBOX[request.sandbox],
                "-c", "skills.include_instructions=false",
                "-c", f"web_search={_toml_str(NETWORK_TO_WEB_SEARCH[request.network])}"]
+        for feature in DISABLED_FEATURES:
+            cmd += ["-c", f"features.{feature}=false"]
         if request.model:
             cmd += ["-m", request.model]
         if request.reasoning:
@@ -134,9 +147,12 @@ class CodexEngine:
         with open(events_path, "w", encoding="utf-8") as out, open(stderr_path, "w", encoding="utf-8") as err:
             # 单独的进程组：终端里按 Ctrl-C 只打断 SMA，由 SMA 负责结束引擎进程
             proc = subprocess.Popen(cmd, stdout=out, stderr=err, stdin=subprocess.DEVNULL, env=self._env(), start_new_session=True)
-            status, reason = self._wait(proc, events_path, request.timeout_s, cancel, start)
+            try:
+                status, reason = self._wait(proc, events_path, request.timeout_s, cancel, start)
+            finally:
+                self._kill_group(proc)      # 引擎自己起的命令、MCP 服务等，不随引擎留在后台
         duration = time.time() - start
-        usage, failure = self._scan_events(events_path)
+        usage, failure, seen = self._scan_events(events_path)
         output = None
         output_path = request.attempt_dir / "output.json"
         if output_path.is_file():
@@ -148,10 +164,10 @@ class CodexEngine:
         if status == "ok" and (proc.returncode != 0 or output is None):
             status = "engine_error"
             reason = failure or self._tail(stderr_path) or f"codex 退出码 {proc.returncode}"
-        if status == "engine_error" and reason and any(h in reason.lower() for h in AUTH_HINTS):
+        if status == "engine_error" and reason and AUTH_PATTERN.search(reason) and self.check().logged_in is False:
             status = "auth_error"
         return StepResult(status, output if status == "ok" else None, self.name, duration, events_path, usage,
-                          self.version(), request.model, None if status == "ok" else reason)
+                          self.version(), request.model, None if status == "ok" else reason, seen)
 
     def _wait(self, proc: subprocess.Popen, events_path: Path, timeout_s: int, cancel: threading.Event | None, start: float) -> tuple[str, str | None]:
         while True:
@@ -171,13 +187,31 @@ class CodexEngine:
                 return "engine_error", "连不上模型提供方（Codex 在反复等待网络）"
 
     @staticmethod
-    def _kill(proc: subprocess.Popen) -> None:
-        proc.terminate()
+    def _signal_group(proc: subprocess.Popen, sig: int) -> None:
         try:
+            if hasattr(os, "killpg"):
+                os.killpg(proc.pid, sig)        # 引擎是进程组的组长（start_new_session）
+            elif proc.poll() is None:
+                proc.send_signal(sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    @classmethod
+    def _kill(cls, proc: subprocess.Popen) -> None:
+        """取消或超时：先请整个进程组退出，10 秒后还在的强制结束。"""
+        cls._signal_group(proc, signal.SIGTERM)
+        with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+        cls._signal_group(proc, signal.SIGKILL)
+        proc.wait()
+
+    @classmethod
+    def _kill_group(cls, proc: subprocess.Popen) -> None:
+        """引擎退出后，清掉进程组里还没退出的子进程。"""
+        if proc.poll() is None:
+            cls._kill(proc)
+        else:
+            cls._signal_group(proc, signal.SIGKILL)
 
     @staticmethod
     def _reconnecting(events_path: Path) -> bool:
@@ -189,15 +223,20 @@ class CodexEngine:
         return len(recent) >= RECONNECT_LIMIT
 
     @staticmethod
-    def _scan_events(events_path: Path) -> tuple[dict | None, str | None]:
+    def _scan_events(events_path: Path) -> tuple[dict | None, str | None, str]:
+        """返回 (用量, 失败原因, 本次看到的外部内容)。看到的内容 = 网页搜索结果、打开的网页、命令和工具的输出。"""
         usage: dict[str, float] = {}
         failure: str | None = None
+        seen: list[str] = []
         for line in events_path.read_text(encoding="utf-8", errors="replace").splitlines():
             try:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
             kind = event.get("type")
+            item = event.get("item") if isinstance(event.get("item"), dict) else {}
+            if kind == "item.completed" and item.get("type") in SEEN_ITEMS:
+                seen.append(json.dumps(item, ensure_ascii=False))
             if kind == "turn.completed" and isinstance(event.get("usage"), dict):
                 for key, value in event["usage"].items():
                     if isinstance(value, (int, float)):
@@ -206,7 +245,7 @@ class CodexEngine:
                 failure = str((event.get("error") or {}).get("message", "turn.failed"))[:2000]
             elif kind == "error" and not failure and "Reconnecting" not in str(event.get("message", "")):
                 failure = str(event.get("message"))[:2000]
-        return usage or None, failure
+        return usage or None, failure, "\n".join(seen)
 
     @staticmethod
     def _tail(path: Path) -> str:

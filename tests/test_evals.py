@@ -68,3 +68,11 @@ def test_run_agent_eval_records_results():
     assert eval_db().evals(failing)[0]["passed"] == 0
     row = compare_batches(batch, failing)[0]
     assert row["a"] is True and row["b"] is False and "keeps_core_asset" in row["changed"]
+
+
+def test_cancelled_eval_records_nothing():
+    import threading
+    cancel = threading.Event()
+    cancel.set()
+    batch = run_agent_eval("creative-director", {"codex": FakeEngine(lambda r, n: cd_output())}, cancel=cancel, retry_delay_s=0)
+    assert eval_db().evals(batch) == []

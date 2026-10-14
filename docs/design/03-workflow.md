@@ -25,6 +25,10 @@
 | `loop` | 返工循环：满足条件时带着意见回到某一步，有轮数上限 |
 | `on_fail` | 失败后怎么办：重试、阻塞或使整次运行失败 |
 | `checkpoint` | 只在 checkpoints 模式生效：在这里暂停，等本人批准 |
+| `params` | 传给本步骤每个实例的固定参数，例如候选数量范围 |
+| `min_success` | `foreach` 至少几个实例成功，汇合步骤才继续；其余失败的实例记录在案 |
+
+M1 实现了 `needs`、`foreach`、`params`、`inputs`（含 `select: top_by_outlier`、`limit`）、`outputs`、`min_success`、`on_fail`；`transform`、`gate`、`loop`、`checkpoint` 和规划 Agent 的提议在 M2 实现。前提检查（`preconditions`）不写成步骤，由编排层在每次执行和续跑时重新检查，因为定位文件可能在两次执行之间被改过。
 
 ```yaml
 id: ideate

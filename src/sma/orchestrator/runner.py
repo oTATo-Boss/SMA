@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import re
 import threading
 import time
@@ -22,6 +21,7 @@ from sma.contracts.validate import Context, hash_error, schema_errors, split_out
 from sma.engines.base import Engine
 from sma.engines.routing import resolve
 from sma.hashing import canonical_json, sha256_file
+from sma.locks import LockBusy, file_lock
 from sma.orchestrator.attempts import AttemptLog, StepJob, rule_params, run_attempts
 from sma.orchestrator.code_steps import CODE_STEPS, CodeContext
 from sma.orchestrator.context import MissingSkill
@@ -38,6 +38,10 @@ from sma.workspace import registry
 from sma.workspace.workspace import Workspace
 
 FINISHED = {"succeeded", "failed"}
+
+
+class RunBusy(RuntimeError):
+    pass
 
 
 @dataclass
@@ -96,6 +100,15 @@ class Runner:
             self._packages[agent_id] = load_package(agent_id)
         return self._packages[agent_id]
 
+    @contextlib.contextmanager
+    def _run_lock(self, run_id: str):
+        """同一次运行同时只能由一个进程执行（例如运行还没结束时又执行了续跑）。"""
+        try:
+            with file_lock(self.ws.run_dir(run_id) / ".lock", wait=False):
+                yield
+        except LockBusy as exc:
+            raise RunBusy(f"运行 {run_id} 正在另一个进程里执行；等它结束，或先停掉它再续跑") from exc
+
     def resume(self, run_id: str) -> str:
         """已成功且产物完好的步骤直接复用；其余的重跑，被重跑步骤的下游全部重跑。"""
         run = self.db.get_run(run_id)
@@ -103,6 +116,11 @@ class Runner:
             raise ValueError(f"没有这次运行：{run_id}")
         if run["status"] == "succeeded":
             raise ValueError(f"运行 {run_id} 已经成功，不需要续跑")
+        with self._run_lock(run_id):
+            self._reset_for_resume(run_id)
+            return self._execute(run_id)
+
+    def _reset_for_resume(self, run_id: str) -> None:
         workflow = self.workflow_of(run_id)
         by_step = self._by_step(workflow)
         reset: set[str] = set()
@@ -123,12 +141,15 @@ class Runner:
                 self.db.upsert_step(run_id, inst_id, status="pending", error=None)
             self.db.delete_step_artifacts(run_id, inst_id)
         self._emit("resume", run=run_id, rerun=sorted(reset))
-        return self.execute(run_id)
 
     def execute(self, run_id: str) -> str:
-        run = self.db.get_run(run_id)
-        if run is None:
+        if self.db.get_run(run_id) is None:
             raise ValueError(f"没有这次运行：{run_id}")
+        with self._run_lock(run_id):
+            return self._execute(run_id)
+
+    def _execute(self, run_id: str) -> str:
+        run = self.db.get_run(run_id)
         workflow = self.workflow_of(run_id)
         instances = expand(workflow)
         by_step = self._by_step(workflow)
@@ -172,6 +193,7 @@ class Runner:
                     inst = running.pop(future)
                     outcome = self._outcome(run_id, inst, future)
                     status[inst.id] = {"cancelled": "pending"}.get(outcome.status, outcome.status)
+                    outcome.error = self._clean(outcome.error)
                     self.db.upsert_step(run_id, inst.id, status=status[inst.id], finished_at=stamp(), duration_s=round(outcome.duration_s, 2),
                                         error=outcome.error, usage=outcome.usage)
                     self._emit("step-end", step=inst.id, status=outcome.status, duration_s=outcome.duration_s, error=outcome.error)
@@ -331,9 +353,8 @@ class Runner:
         return done
 
     def _isolation_problems(self, output: dict) -> list[str]:
-        mentions = foreign_mentions(json.dumps(output, ensure_ascii=False), self._others, self._allowed)
-        # 不把其他账号的名字写进本账号的记录，只报数量
-        return [f"[隔离] 输出里出现了本机其他账号的名称或路径（{len(mentions)} 处）；只能使用本账号的资料"] if mentions else []
+        hits = foreign_mentions(output, self._others, self._allowed)
+        return [f"[隔离] {where} 里出现了本机其他账号的名称（{masked}）；只能使用本账号的资料，请改掉" for where, masked in hits[:10]]
 
     def _memory(self, package: Package) -> str | None:
         if not package.spec.memory.read:
@@ -376,12 +397,15 @@ class Runner:
         changed = [f"{kind}：{'、'.join(paths[:10])}" for kind, paths in changes.items() if paths]
         self.db.add_check(f"run:{run_id}", "workspace-isolation", "warn" if changed else "pass",
                           "；".join(changed) or "运行期间工作区里 SMA 目录以外的文件没有变化")
+        error = self._clean(error)
         if blocked is not None:
+            blocked.detail = self._clean(blocked.detail) or ""
             content = {"reason": blocked.reason, "done": sorted(i for i, s in status.items() if s == "succeeded"),
                        "needed": blocked.needed, "resume": f"sma runs resume {run_id} --account {self.ws.root}"}
             problems = validate_content("blocking-report", content)
             if problems:
                 raise RuntimeError(f"阻塞报告不合格（编排层的问题）：{problems}")
+            self.db.delete_artifacts(run_id, "blocking-report")      # 只留最新的一份，旧的文件仍在运行目录里
             self._store(run_id, Instance(step_id, step_id), {"blocking-report": [content]}, [OutputSpec("blocking-report")],
                         Producer("sma", sma.__version__, "code", None), [])
             self.db.set_run_status(run_id, "blocked", blocked_reason=blocked.reason, error=blocked.detail or None)
@@ -392,6 +416,9 @@ class Runner:
         return final
 
     # ---- 其他 ----
+    def _clean(self, text: str | None) -> str | None:
+        return redact_text(text, self._secrets) if text else text
+
     def _new_run_id(self) -> str:
         base = f"r-{compact()}"
         run_id, n = base, 1

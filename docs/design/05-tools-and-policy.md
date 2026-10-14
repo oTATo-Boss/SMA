@@ -12,7 +12,7 @@ Agent 能用的外部能力，全部通过 SMA 自己写的 MCP 服务提供。�
 | `sma-research` | `search`（平台、关键词）、`open`、`profile_posts`、`post_detail`、`comments`、`screenshot`、`playback_frames`（播放时按时间点截图） | 只读 | 市场研究、增长分析 | M2 |
 | `sma-media` | `probe`、`frames`、`contact_sheet`、`loudness`、`scene_cuts`、`transcribe`（可选依赖） | 只写尝试目录 | 市场研究、审片、后期 | M2 |
 | `sma-generate` | `providers`、`submit`（带幂等键）、`status`、`fetch` | 有副作用，受台账约束 | 素材制作 | M3 |
-| `sma-workspace` | `strategy`、`library_search`、`benchmarks`、`assets_list`、`memory` | 只读 | 所有包 | M1 |
+| `sma-workspace` | `strategy`、`library_search`、`benchmarks`、`assets_list`、`memory` | 只读 | 所有包 | M2（M1 的输入以文件快照放进步骤目录） |
 
 - **没有任何写平台的工具。** 发布、评论、私信、点赞、关注，SMA 里根本不存在对应的能力。
 - **入库和打包不是工具，是代码。** 爆款条目入库、经验写入、内容包复制到 `交付/`，都由编排层在校验后执行。
@@ -57,7 +57,7 @@ Agent 能用的外部能力，全部通过 SMA 自己写的 MCP 服务提供。�
 
 - **引擎层**：不读用户配置，所以全局记忆、个人插件、个人 MCP 都不进来；会话不落盘；工作目录是尝试目录。
 - **数据层**：一次运行只绑定一个账号工作区；工具只接受这个工作区；爆款库和经验按工作区分开存。
-- **检测**：SMA 知道本机登记过的所有账号工作区，运行结束后扫描产物里有没有其他账号的名称和路径，比 AI-SMA 按同级文件夹名猜更准。
+- **检测**：SMA 知道本机登记过的所有账号工作区，每一步的产物都扫描有没有其他账号的名称和路径，比 AI-SMA 按同级文件夹名猜更准。本账号自己的名字和 `isolation.allowed_terms` 覆盖住的位置不算；命中时带着 JSON 位置修复重试，提示里只露出名称的首尾字，不把其他账号的名称写进本账号的记录。运行前后还给工作区拍快照，SMA 目录以外的文件有变化就记一条检查。
 - **诚实的限制**：引擎进程能读到磁盘上的其他文件，沙箱主要限制的是写。现阶段靠只给本账号路径和事后扫描兜底；以后可以让引擎在单独的系统用户或容器里运行。
 
 ## 6. 浏览器研究

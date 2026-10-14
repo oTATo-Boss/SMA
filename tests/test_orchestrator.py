@@ -85,6 +85,29 @@ def test_invalid_output_is_repaired(workspace):
     assert "上一次的输出没有通过校验" in second.read_text(encoding="utf-8")
 
 
+def test_links_must_have_been_seen(workspace):
+    """引擎报告了看到的内容时，引用没出现过的链接要修复重试。"""
+
+    class SeeingEngine(FakeEngine):
+        def run(self, request, cancel=None):
+            result = super().run(request, cancel)
+            result.seen_text = "搜索结果：https://example.com/v/viral-1 https://example.com/v/adjacent-1 https://example.com/v/shared"
+            return result
+
+    def responder(request, n):
+        output = default_responder(request, n)
+        if request.label == "research[viral]" and n == 1:
+            output["opportunity_brief"]["opportunities"][0]["evidence_refs"].append("https://made.up/video/123456789")
+        return output
+
+    engine = SeeingEngine(responder)
+    r = Runner(workspace, {"codex": engine}, retry_delay_s=0)
+    run_id, status = r.run("ideate", "今天做一条视频")
+    assert status == "succeeded" and engine.calls["research[viral]"] == 2
+    problems = workspace.db.list_attempts(run_id, "research[viral]")[0]["problems"]
+    assert any("made.up" in p for p in problems)
+
+
 def test_one_ideation_lane_may_fail(workspace):
     def responder(request, n):
         if request.label == "ideation[original]":
@@ -182,6 +205,18 @@ def test_cancel_then_resume(workspace):
     assert r2.resume(run_id) == "succeeded"
 
 
+def test_resume_after_crash(workspace):
+    """进程被强行结束：运行和步骤停在 running，续跑时重跑这些步骤。"""
+    r, _ = runner(workspace)
+    run_id, _ = r.run("ideate", "今天做一条视频")
+    workspace.db.set_run_status(run_id, "running")
+    for step_id in ["ideation[original]", "ideation[cross-domain]"]:
+        workspace.db.upsert_step(run_id, step_id, status="running")
+    r2, engine2 = runner(workspace)
+    assert r2.resume(run_id) == "succeeded"
+    assert engine2.calls == {"ideation[original]": 1, "ideation[cross-domain]": 1}
+
+
 def test_parallel_limit(workspace):
     lock = threading.Lock()
     state = {"now": 0, "max": 0}
@@ -257,3 +292,71 @@ def test_research_output_helper_is_valid():
     from sma.contracts.schemas import OutputSpec
     from sma.contracts.validate import Context, validate_output
     assert validate_output([OutputSpec("viral-reference", True), OutputSpec("opportunity-brief")], research_output("x"), Context()) == []
+
+
+def test_engine_errors_are_redacted(workspace, monkeypatch):
+    monkeypatch.setenv("FAKE_PROVIDER_TOKEN", "tok-0123456789abcdef")
+
+    def responder(request, n):
+        if request.label == "research[viral]":
+            return RuntimeError("调用失败 tok-0123456789abcdef")
+        return default_responder(request, n)
+
+    r, _ = runner(workspace, responder)
+    run_id, status = r.run("ideate", "今天做一条视频")
+    assert status == "succeeded"
+    rows = [*workspace.db.list_attempts(run_id, "research[viral]"), workspace.db.get_step(run_id, "research[viral]")]
+    text = json.dumps(rows, ensure_ascii=False)
+    assert "tok-0123456789abcdef" not in text and "[已脱敏:FAKE_PROVIDER_TOKEN]" in text
+
+
+def test_latest_blocking_report_wins(workspace):
+    (workspace.root / "strategy" / "positioning.md").write_text("改过", encoding="utf-8")
+
+    class Flaky(FakeEngine):
+        def run(self, request, cancel=None):
+            result = super().run(request, cancel)
+            if request.label.startswith("ideation["):
+                result.status, result.output, result.error = "auth_error", None, "401 Unauthorized"
+            return result
+
+    r = Runner(workspace, {"codex": Flaky(default_responder)}, retry_delay_s=0)
+    run_id, status = r.run("ideate", "今天做一条视频")
+    assert status == "blocked"
+    workspace.confirm_positioning("确认")
+    assert r.resume(run_id) == "blocked"
+    reports = workspace.db.artifacts(run_id, artifact_type="blocking-report")
+    assert len(reports) == 1
+    content = json.loads((workspace.root / reports[0]["path"]).read_text(encoding="utf-8"))["content"]
+    assert content["reason"] == "needs-login" and workspace.db.get_run(run_id)["blocked_reason"] == "needs-login"
+
+
+def test_run_cannot_execute_twice_at_once(workspace):
+    from sma.locks import file_lock
+    from sma.orchestrator.runner import RunBusy
+    r, engine = runner(workspace)
+    run_id = r.start("ideate", "今天做一条视频")
+    with file_lock(workspace.run_dir(run_id) / ".lock"), pytest.raises(RunBusy):
+        r.execute(run_id)
+    assert engine.calls == {}
+
+
+def test_stray_attempt_directory_is_skipped(workspace):
+    r, _ = runner(workspace)
+    run_id = r.start("ideate", "今天做一条视频")
+    (workspace.run_dir(run_id) / "steps" / "research-viral" / "attempt-1").mkdir(parents=True)
+    assert r.execute(run_id) == "succeeded"
+    assert [a["n"] for a in workspace.db.list_attempts(run_id, "research[viral]")] == [2]
+
+
+def test_broken_skill_file_fails_step_with_record(tmp_path, workspace):
+    from sma.packages import skills
+    skill = tmp_path / "skills" / "creative-director" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_bytes(b"---\nname: creative-director\n---\n\xff\xfe bad")
+    skills.clear_cache()
+    r, _ = runner(workspace)
+    run_id, status = r.run("ideate", "今天做一条视频")
+    assert status == "failed"
+    attempts = workspace.db.list_attempts(run_id, "ideation[original]")
+    assert attempts and attempts[0]["status"] == "error" and "准备步骤目录出错" in attempts[0]["exit"]

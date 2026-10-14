@@ -16,6 +16,7 @@ from jsonschema import Draft202012Validator
 
 from sma.contracts.schemas import OutputSpec, content_schema, field_name
 from sma.hashing import sha256_file
+from sma.urls import unseen_urls  # noqa: F401  对外沿用 validate.unseen_urls
 
 URL = re.compile(r"^https?://\S+$")
 
@@ -100,7 +101,11 @@ def validate_output(outputs: list[OutputSpec], output: dict, ctx: Context) -> li
     if problems:
         return [f"[Schema] {p}" for p in problems]
     parts = split_output(outputs, output)
-    ctx.local_refs = {ref["key"] for ref in parts.get("viral-reference", [])}
+    keys = [ref["key"] for ref in parts.get("viral-reference", [])]
+    ctx.local_refs = set(keys)
+    repeated = sorted({k for k in keys if keys.count(k) > 1})
+    if repeated:
+        problems.append(f"[规则] viral-reference 的 key 重复：{repeated}；每条用不同的代号")
     for artifact_type, items in parts.items():
         for i, content in enumerate(items):
             where = f"{artifact_type}[{i}]"
@@ -122,6 +127,23 @@ def collect_refs(content) -> list[str]:
         for item in content:
             found += collect_refs(item)
     return found
+
+
+def collect_urls(content) -> list[str]:
+    """内容里引用的公开链接：url 字段和 evidence_refs 里的链接（任意深度）。"""
+    found: list[str] = []
+    if isinstance(content, dict):
+        for key, value in content.items():
+            if key == "url" and isinstance(value, str) and URL.match(value):
+                found.append(value)
+            elif key == "evidence_refs" and isinstance(value, list):
+                found += [v for v in value if isinstance(v, str) and URL.match(v)]
+            else:
+                found += collect_urls(value)
+    elif isinstance(content, list):
+        for item in content:
+            found += collect_urls(item)
+    return list(dict.fromkeys(found))
 
 
 def hash_error(path: Path, expected: str) -> str | None:

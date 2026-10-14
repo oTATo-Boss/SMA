@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from sma.workspace.workspace import normalize_url
+from sma.urls import normalize_url
 
 URL = re.compile(r"https?://[^\s\"'，。）)]+")
 GAP_WORDS = ("假设", "依据不足", "证据不足", "待验证", "缺少数据", "没有数据", "数据不足")

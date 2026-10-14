@@ -6,17 +6,18 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sma.contracts.validate import Context, EvidenceResolver, validate_output
+from sma.contracts.validate import Context, EvidenceResolver, collect_urls, unseen_urls, validate_output
 from sma.engines.base import Engine, StepRequest
 from sma.engines.routing import Route
 from sma.orchestrator.context import InputFile, assemble
 from sma.packages.loader import Package
-from sma.tracing.redact import redact_file
+from sma.tracing.redact import redact_file, redact_text
 
 TRACE_FILES = ("events.jsonl", "stderr.log", "output.json", "prompt.md")
 
@@ -81,6 +82,22 @@ def check_output(package: Package, output: dict, rule_params: dict, resolver: Ev
     return problems
 
 
+def seen_problems(job: StepJob, output: dict, seen_text: str | None) -> list[str]:
+    """第 3 层校验的一部分：引用的链接必须出现在输入文件或引擎本次看到的内容里。
+    引擎报告不了看到什么、又允许联网时跳过（不能核对）。"""
+    if seen_text is None and job.package.spec.network != "none":
+        return []
+    corpus = "\n".join([*(f.content for f in job.inputs), seen_text or ""])
+    return [f"[证据] 链接 {url} 不在输入文件、本次搜索结果或读过的内容里；只引用真的看到的链接，或删掉这条依据"
+            for url in unseen_urls(collect_urls(output), corpus)]
+
+
+def highest_attempt(step_dir: Path) -> int:
+    """目录里已有的最大尝试序号（包括状态库里没登记上的）。"""
+    numbers = [int(m.group(1)) for p in step_dir.glob("attempt-*") if (m := re.fullmatch(r"attempt-(\d+)", p.name))]
+    return max(numbers, default=0)
+
+
 def run_attempts(job: StepJob, *, cancel: threading.Event, secrets: dict[str, str], retry_delay_s: float = 2.0,
                  on_start: Callable[[int, Path], None] | None = None,
                  on_end: Callable[[AttemptLog], None] | None = None) -> AttemptsResult:
@@ -89,9 +106,14 @@ def run_attempts(job: StepJob, *, cancel: threading.Event, secrets: dict[str, st
     logs: list[AttemptLog] = []
     repair: list[str] | None = None
     last_error, last_kind = "", None
-    n = job.first_n - 1
+    n = max(job.first_n - 1, highest_attempt(job.step_dir))
+
+    def clean(text: str | None) -> str | None:
+        return redact_text(text, secrets) if text else text
 
     def finish(log: AttemptLog) -> None:
+        log.detail = clean(log.detail)
+        log.problems = [clean(p) for p in log.problems]
         logs.append(log)
         if on_end:
             on_end(log)
@@ -104,10 +126,14 @@ def run_attempts(job: StepJob, *, cancel: threading.Event, secrets: dict[str, st
         n += 1
         attempt_dir = job.step_dir / f"attempt-{n}"
         attempt_dir.mkdir(parents=True)
-        assembled = assemble(attempt_dir, job.package, run_label=job.run_label, task=job.task, params=job.params,
-                             inputs=job.inputs, extra_paths=job.extra_paths, memory=job.memory, repair=repair)
         if on_start:
-            on_start(n, attempt_dir)
+            on_start(n, attempt_dir)            # 先登记再装配：装配出错也留下记录
+        try:
+            assembled = assemble(attempt_dir, job.package, run_label=job.run_label, task=job.task, params=job.params,
+                                 inputs=job.inputs, extra_paths=job.extra_paths, memory=job.memory, repair=repair)
+        except Exception as exc:                # 例如技能文件读不了：重试也没用
+            finish(AttemptLog(n, attempt_dir, "error", f"准备步骤目录出错：{type(exc).__name__}: {exc}"))
+            return AttemptsResult("failed", None, job.route.model, usage, logs, logs[-1].detail)
         spec = job.package.spec
         result = job.engine.run(StepRequest(label=job.label, attempt_dir=attempt_dir, prompt=assembled.prompt,
                                             output_schema=assembled.schema_path, sandbox=spec.sandbox, network=spec.network,
@@ -123,18 +149,19 @@ def run_attempts(job: StepJob, *, cancel: threading.Event, secrets: dict[str, st
             return AttemptsResult("cancelled", None, job.route.model, usage, logs, "已取消")
         if result.status == "auth_error":
             finish(log)
-            return AttemptsResult("auth_error", None, job.route.model, usage, logs, result.error)
+            return AttemptsResult("auth_error", None, job.route.model, usage, logs, log.detail)
         if result.status != "ok":
-            last_error, last_kind = f"{result.status}：{result.error}", "engine"
             finish(log)
+            last_error, last_kind = f"{result.status}：{log.detail}", "engine"
             continue
         problems = check_output(job.package, result.output, job.rule_params, job.resolver)
+        problems += seen_problems(job, result.output, result.seen_text)
         if job.extra_checks:
             problems += job.extra_checks(result.output)
         if problems:
             log.status, log.problems = "invalid", problems
-            last_error, last_kind, repair = "输出没通过校验：" + "；".join(problems[:5]), "invalid", problems
             finish(log)
+            last_error, last_kind, repair = "输出没通过校验：" + "；".join(log.problems[:5]), "invalid", log.problems
             continue
         finish(log)
         return AttemptsResult("succeeded", result.output, result.model or job.route.model, usage, logs)

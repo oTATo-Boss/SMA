@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from helpers import viral_ref
 
@@ -40,7 +42,7 @@ def test_confirmation_is_bound_to_file_hash(workspace):
 
 
 def test_library_dedupes_by_url(workspace):
-    first = workspace.add_library_entries([viral_ref("r1", "https://example.com/v/1?utm=a"), viral_ref("r2", "https://example.com/v/2")], "run/a")
+    first = workspace.add_library_entries([viral_ref("r1", "https://example.com/v/1?utm_source=a"), viral_ref("r2", "https://example.com/v/2")], "run/a")
     second = workspace.add_library_entries([viral_ref("r1", "https://EXAMPLE.com/v/1/"), viral_ref("r3", "https://example.com/v/3")], "run/b")
     assert first["r1"] == second["r1"]
     ids = sorted({*first.values(), *second.values()})
@@ -50,14 +52,60 @@ def test_library_dedupes_by_url(workspace):
     assert workspace.has_library(first["r1"]) and not workspace.has_library("dy-20000101-99")
 
 
-def test_normalize_url():
-    assert normalize_url("HTTPS://Example.com/a/?x=1") == "https://example.com/a"
+def test_platform_code_prefers_domain():
+    from sma.workspace.workspace import platform_code
+    assert platform_code("哔哩哔哩", "https://www.bilibili.com/video/BV1/") == "bili"
+    assert platform_code("某平台", "https://v.douyin.com/abc") == "dy"
+    assert platform_code("B 站") == "bili" and platform_code("没听过的平台") == "web"
+
+
+def test_normalize_url_keeps_identity_params():
+    assert normalize_url("HTTPS://Example.com/a/?utm_source=x&share_from=y&spm_id_from=z") == "https://example.com/a"
+    assert normalize_url("https://www.youtube.com/watch?v=AAA&si=x") != normalize_url("https://www.youtube.com/watch?v=BBB&si=x")
+    assert normalize_url("https://www.douyin.com/user/u?modal_id=1&from=s") == "https://www.douyin.com/user/u?modal_id=1"
+
+
+def test_different_videos_with_query_ids_stay_separate(workspace):
+    ids = workspace.add_library_entries([viral_ref("r1", "https://www.youtube.com/watch?v=AAAAAAAAAAA", platform="YouTube"),
+                                         viral_ref("r2", "https://www.youtube.com/watch?v=BBBBBBBBBBB", platform="YouTube")], "run/a")
+    assert ids["r1"] != ids["r2"] and all(i.startswith("yt-") for i in ids.values())
+
+
+def test_stray_library_files_do_not_break_ingest(workspace):
+    from sma.timeutil import now
+    (workspace.library_dir() / f"dy-{now():%Y%m%d}-01 copy.json").write_text("{}", encoding="utf-8")
+    ids = workspace.add_library_entries([viral_ref("r1", "https://example.com/v/9")], "run/a")
+    assert ids["r1"].endswith("-01")
+
+
+def test_concurrent_ingest_from_two_processes(workspace):
+    import subprocess
+    import sys
+    script = (
+        "import sys; sys.path.insert(0, sys.argv[2]); from pathlib import Path; from helpers import viral_ref;"
+        "from sma.workspace.workspace import Workspace; ws = Workspace(Path(sys.argv[1]));"
+        "ws.add_library_entries([viral_ref(f'r{i}', f'https://example.com/{sys.argv[3]}/{i}') for i in range(40)], 'p')"
+    )
+    tests_dir = str(Path(__file__).parent)
+    procs = [subprocess.Popen([sys.executable, "-c", script, str(workspace.root), tests_dir, name]) for name in ("a", "b")]
+    assert all(p.wait(timeout=60) == 0 for p in procs)
+    assert len(list(workspace.library_dir().glob("*.json"))) == 80
 
 
 def test_data_paths_stay_inside_workspace(workspace):
     (workspace.root / "data" / "后台.csv").write_text("a,b", encoding="utf-8")
     assert workspace.has_data("后台.csv")
     assert not workspace.has_data("../sma.yaml")
+    assert not workspace.has_data("坏\x00名字.csv")
+
+
+def test_symlinked_data_dir(tmp_path, workspace):
+    real = tmp_path / "真实资料"
+    real.mkdir()
+    (real / "a.csv").write_text("1", encoding="utf-8")
+    (workspace.root / "data").rmdir()
+    (workspace.root / "data").symlink_to(real)
+    assert workspace.has_data("a.csv")
 
 
 def test_registry_lists_other_accounts(tmp_path, workspace):

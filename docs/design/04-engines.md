@@ -24,14 +24,13 @@ class Engine(Protocol):
 | `model`、`reasoning` | 已经解析好的具体型号和推理强度（第 8 节） |
 | `sandbox`、`network` | 来自包的声明 |
 | `mcp_servers` | 已解析的 MCP 服务启动命令和工具白名单 |
-| `skills` | 要加载的技能名 |
 | `images` | 需要看的图片，例如审片抽帧 |
 | `timeout_s` | 超时 |
-| `env` | 要传入的环境变量名（只传名字，值由进程环境提供） |
+| `env` | 要传入的环境变量名（只传名字，值由进程环境提供）；M3 接生成服务时加 |
 
 | `StepResult` 字段 | 说明 |
 |---|---|
-| `status` | `ok`、`engine_error`、`timeout`、`cancelled` |
+| `status` | `ok`、`engine_error`、`auth_error`（登录失效，编排层直接阻塞）、`timeout`、`cancelled` |
 | `output` | 解析后的 JSON；没有或解析失败为空 |
 | `events_path` | 引擎事件流，原样保存 |
 | `usage` | 引擎报告的用量（有则记） |
@@ -43,9 +42,11 @@ class Engine(Protocol):
 
 ```text
 runs/<运行>/steps/<步骤>/attempt-<n>/
-├── AGENTS.md        生成的：角色指令、策略摘要、要读的技能和知识
+├── AGENTS.md        生成的：策略摘要、角色指令、知识、技能内容、本账号经验
 ├── CLAUDE.md        只有一行 @AGENTS.md，给 Claude 用
-├── inputs/          本步骤的输入产物（JSON），评审类已盲化
+├── inputs/          本步骤的输入：上游产物（JSON）和定位等工作区文件的快照，评审类已盲化
+├── schema.json      本步骤的输出 Schema（严格模式）
+├── prompt.md        任务正文（修复重试时附上次的校验问题）
 ├── output.json      引擎的最终回复
 ├── events.jsonl     引擎事件流
 └── stderr.log
@@ -83,6 +84,10 @@ codex exec \
 - **SMA 的 Codex 主目录**：放在 SMA 的用户配置目录里，只有一个指向用户 `auth.json` 的软链接，不复制凭据；`sma doctor` 检查链接和登录。实测证明这样能挡住全局 `AGENTS.md` 和全局记忆，写隔离不变（[实测](../spikes/codex-engine.md)）。
 - **网络**：沙箱里默认断网；网页搜索是托管工具，按包的 `network` 决定：`none` → `disabled`，`web` → `cached`（需要实时结果时 `live`），`tools-only` → `disabled`，只用挂载的 MCP 工具。
 - **超时**：提供方连不上时 Codex 会一直重连而不退出，适配层自己计时，并把连续的"等待网络"事件判为失败。
+- **只开声明的能力**：Codex 默认开着 ChatGPT 连接器、插件、浏览器和电脑操作、子 Agent、生图、技能搜索等，适配层每次用 `-c features.<名字>=false` 全部关掉（实测 T10）。
+- **进程**：引擎在单独的进程组里运行；取消、超时或引擎退出后，结束整个进程组，引擎起的命令和 MCP 服务不会留在后台。SMA 收到 Ctrl-C、kill 或终端关闭时，先结束引擎再退出。
+- **登录失效**：错误像登录问题时，再用 `codex login status` 确认，确实没登录才阻塞（`needs-login`），否则按普通错误重试。
+- **看到的内容**：从事件流取出搜索结果、打开的网页和命令输出，交给编排层核对引用的链接（实测 T11）。
 
 登录方式：
 
@@ -119,14 +124,17 @@ claude -p \
 
 不依赖引擎自动发现技能（实测会把本机全部技能的说明注入上下文，约 2 万 token）。由 SMA 按包的 `skills` 声明，在本机技能根目录里按名字找到 `SKILL.md`，把内容写进尝试目录的 `AGENTS.md`；必需技能找不到时，步骤不运行并报告缺什么。技能包里引用的脚本和参考资料，以 `SKILL.md` 所在目录的绝对路径告诉引擎，只读。
 
+单步上下文（M1 真实运行）：创意总监一步注入角色指令、创意方法和 3 个技能，整步累计 9–13 万输入 token；市场研究一步要做几十次网页搜索，每次都把上下文再发一遍，累计 190–490 万输入 token，九成命中缓存。技能按需选择，研究步骤的用量是 M2 优化的重点（研究工具直接返回结构化数据，减少来回搜索）。
+
 ## 8. 模型路由
 
 确定一个步骤用哪个型号，按这个顺序找，先找到的为准：
 
-1. 流程定义里对这一步的指定；
+1. 流程定义里对这一步的指定（M2）；
 2. 账号配置 `models.agents.<包>`；
-3. 包的 `model.family` 和 `model.tier`；
-4. 全局默认：每个档位在每个引擎上对应的具体型号。
+3. 包的 `model.tier`，按账号配置的 `models.tiers` 换成具体型号；
+4. 用户级默认：`~/.config/sma/config.yaml` 的 `models.tiers`，所有账号共用；
+5. 都没有时用引擎自己的默认型号。
 
 ```yaml
 models:

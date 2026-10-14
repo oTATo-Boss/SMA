@@ -72,7 +72,8 @@ def write_prompt(task: str, params: dict, inputs: list[InputFile], extra_paths: 
         lines.append("")
     lines.append("按 AGENTS.md 的角色指令完成本步骤，最终回复一个符合 Schema 的 JSON。")
     if repair:
-        lines += ["", "上一次的输出没有通过校验，问题如下。请修正后重新输出完整的 JSON：", *[f"- {p}" for p in repair[:30]]]
+        lines += ["", "上一次的输出没有通过校验，问题如下。请修正后重新输出完整的 JSON（内容里不要提到这次修正）：",
+                  *[f"- {p}" for p in repair[:30]]]
     return "\n".join(lines)
 
 

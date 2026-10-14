@@ -1,6 +1,6 @@
 id: market-intel
 name: 市场研究
-version: 0.1.0
+version: 0.2.0
 description: 找被市场验证过的机会：搜本赛道和相邻赛道近期明显超过作者常态的作品，拆解机制，交爆款条目和机会简报
 kind: worker
 inputs:

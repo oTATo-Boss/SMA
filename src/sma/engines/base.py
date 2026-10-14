@@ -43,6 +43,7 @@ class StepResult:
     engine_version: str | None = None
     model: str | None = None
     error: str | None = None
+    seen_text: str | None = None    # 本次实际看到的外部内容（搜索结果、打开的网页、命令输出），核对引用用；引擎报告不了时为 None
 
 
 @dataclass

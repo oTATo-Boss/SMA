@@ -71,7 +71,9 @@ def case_inputs(package: Package, case: dict) -> tuple[list[InputFile], set[str]
 
 
 def run_case(package: Package, case: dict, *, engine: Engine, route, batch: str, cancel: threading.Event, secrets: dict,
-             retry_delay_s: float, on_event: Callable[[dict], None]) -> dict:
+             retry_delay_s: float, on_event: Callable[[dict], None]) -> dict | None:
+    if cancel.is_set():                 # 已经停止：没开始的用例不跑、不记录
+        return None
     files, lib_ids, urls = case_inputs(package, case)
     params = case.get("params", {})
     job = StepJob(label=case["id"], package=package, route=route, engine=engine, step_dir=user_config_dir() / "evals" / batch / case["id"],
@@ -87,6 +89,10 @@ def run_case(package: Package, case: dict, *, engine: Engine, route, batch: str,
         for name in case.get("expect", {}).get("checks", []):
             fn = CHECKS.get(name)
             checks[name] = list(fn(result.output, ctx)) if fn else [False, f"没有这个检查：{name}"]
+    if result.status == "cancelled":
+        on_event({"kind": "case-end", "case": case["id"], "passed": False, "status": "cancelled", "attempts": len(result.attempts),
+                  "duration_s": 0.0, "checks": {}, "error": "已取消"})
+        return None
     passed = result.status == "succeeded" and all(ok for ok, _ in checks.values())
     details = {"note": case.get("note", ""), "status": result.status, "error": result.error, "attempts": len(result.attempts),
                "first_pass": bool(result.attempts) and result.attempts[0].status == "ok", "checks": checks, "usage": result.usage,

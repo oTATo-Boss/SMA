@@ -188,6 +188,10 @@ class StateDB:
         rows = self.conn().execute(sql + " ORDER BY step_id, id", args).fetchall()
         return [_row(r) for r in rows]
 
+    def delete_artifacts(self, run_id: str, artifact_type: str) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM artifacts WHERE run_id=? AND type=?", (run_id, artifact_type))
+
     def delete_step_artifacts(self, run_id: str, step_id: str) -> None:
         """重跑一个步骤前，撤下它旧的登记（文件保留在旧的尝试目录里）。"""
         with self.tx() as c:
