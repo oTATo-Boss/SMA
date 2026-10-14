@@ -59,28 +59,37 @@ runs/<运行>/steps/<步骤>/attempt-<n>/
 ## 4. Codex CLI
 
 ```text
+CODEX_HOME=<SMA 的 Codex 主目录> \    # 只有指向用户登录文件的软链接：不带入全局 AGENTS.md 和全局记忆
 codex exec \
   --ephemeral \                       # 不留会话文件：不进 Codex 历史，也不会被拿去生成记忆
-  --ignore-user-config \              # 不读用户的 config.toml：全局记忆、个人插件、个人 MCP 都不带入；登录仍然有效
+  --ignore-user-config \              # 不读 config.toml：个人插件、个人 MCP、个人设置都不带入
   --skip-git-repo-check \
   --json \                            # 事件流，保存为 events.jsonl
-  --output-schema <schema.json> \     # 约束最终回复的结构
+  --output-schema <schema.json> \     # 严格模式的 Schema，约束最终回复
   -o <attempt>/output.json \
   -C <attempt> \
   -s read-only | workspace-write \
   -m <型号> \
   -c model_reasoning_effort=<强度> \
-  -c 'mcp_servers.<名字>.command=…' \  # 只挂本步骤声明的工具（M1 实测）
+  -c skills.include_instructions=false \         # 不注入本机全部技能的清单；需要的技能由 SMA 写进 AGENTS.md
+  -c web_search=disabled | cached | live \        # 按包的 network 声明
+  -c 'mcp_servers.<名字>.command=…' -c 'mcp_servers.<名字>.args=[…]' \
+  -c 'mcp_servers.<名字>.enabled_tools=[…]' \
+  -c 'mcp_servers.<名字>.default_tools_approval_mode="approve"' \  # 非交互运行必须设，否则工具调用被拒
   -i <图片> … \                        # 需要看图的步骤
   "<任务>"
 ```
+
+- **SMA 的 Codex 主目录**：放在 SMA 的用户配置目录里，只有一个指向用户 `auth.json` 的软链接，不复制凭据；`sma doctor` 检查链接和登录。实测证明这样能挡住全局 `AGENTS.md` 和全局记忆，写隔离不变（[实测](../spikes/codex-engine.md)）。
+- **网络**：沙箱里默认断网；网页搜索是托管工具，按包的 `network` 决定：`none` → `disabled`，`web` → `cached`（需要实时结果时 `live`），`tools-only` → `disabled`，只用挂载的 MCP 工具。
+- **超时**：提供方连不上时 Codex 会一直重连而不退出，适配层自己计时，并把连续的"等待网络"事件判为失败。
 
 登录方式：
 
 | 方式 | 怎么用 | 说明 |
 |---|---|---|
 | 本机 Codex 登录 | 默认；`sma doctor` 用 `codex login status` 检查 | 用户的 ChatGPT 账号额度 |
-| 自定义 API | 用 `-c model_provider=<id>`、`-c 'model_providers.<id>.base_url=…'`、`-c 'model_providers.<id>.env_key=<变量名>'` 传入 | Key 只放在环境变量里；因为不读用户配置，提供方必须由命令行参数给出（M1 实测） |
+| 自定义 API | `-c model_provider=<id>`、`-c 'model_providers.<id>.base_url=…'`、`-c 'model_providers.<id>.env_key=<变量名>'` | 实测有效；Key 只放在环境变量里 |
 
 以后需要长会话或界面嵌入时，改用 Codex 官方的 `app-server` 协议（有 TypeScript 绑定和 JSON Schema），不改编排层。
 
@@ -108,11 +117,7 @@ claude -p \
 
 ## 7. 技能加载
 
-| 引擎 | 方式 | 待确认 |
-|---|---|---|
-| Codex | 从技能根目录自动发现；`AGENTS.md` 里写明本步骤要完整读哪些技能 | 不读用户配置时技能还能否被发现 |
-| Claude | 用 `--agents` 定义临时角色并预加载技能，或指定插件目录 | 哪种方式和 `-p` 配合最稳 |
-| 两者都不行时 | 把必需技能的 `SKILL.md` 内容直接放进 `AGENTS.md` | 上下文长度 |
+不依赖引擎自动发现技能（实测会把本机全部技能的说明注入上下文，约 2 万 token）。由 SMA 按包的 `skills` 声明，在本机技能根目录里按名字找到 `SKILL.md`，把内容写进尝试目录的 `AGENTS.md`；必需技能找不到时，步骤不运行并报告缺什么。技能包里引用的脚本和参考资料，以 `SKILL.md` 所在目录的绝对路径告诉引擎，只读。
 
 ## 8. 模型路由
 
@@ -139,16 +144,12 @@ models:
 - 从事件流里取用量（有则记），每次运行汇总；按用户决定，不设预算上限，但用量随时可查。
 - 每个引擎有自己的并发上限；遇到限流按退避重试。
 
-## 10. M1 要实测的点
+## 10. 实测结论
 
-| 编号 | 问题 |
-|---|---|
-| T1 | `--ignore-user-config` 下，用命令行参数配置自定义提供方是否可用 |
-| T2 | 用 `-c mcp_servers.*` 按次挂载 MCP 服务是否可用，工具白名单怎么设 |
-| T3 | `exec` 模式会不会自动加载工作目录里的 `AGENTS.md`，是否需要信任项目 |
-| T4 | 不读用户配置时，技能能否被发现、能否按名字读取 |
-| T5 | `--output-schema` 对复杂 Schema 的支持和失败时的表现 |
-| T6 | 沙箱的写限制、默认是否禁网、MCP 工具能否联网 |
-| T7 | 事件流里有哪些字段，用量在哪里 |
-| T8 | `-i` 传多张图的上限 |
-| T9 | 多个 `codex exec` 并行时的限流表现 |
+T1–T9 已在 M1 开始时实测，结论和数据见 [Codex 引擎实测](../spikes/codex-engine.md)。要点：
+
+- 提供方、MCP 服务、网页搜索、技能注入都能用命令行参数按次控制，不依赖用户配置；
+- MCP 工具必须设 `default_tools_approval_mode="approve"`；
+- Schema 必须是严格模式；
+- 工作目录的 `AGENTS.md` 自动加载，不需要信任项目；
+- 3 路并行没有限流。
