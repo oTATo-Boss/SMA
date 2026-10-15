@@ -21,6 +21,7 @@ from sma.evals.runner import compare_batches, eval_db, run_agent_eval
 from sma.orchestrator.runner import RunBusy, Runner
 from sma.orchestrator.workflow import expand, parse_workflow
 from sma.packages.loader import lint_package, list_packages
+from sma.research.browser import PLATFORMS, BrowserError, endpoint, open_browser
 from sma.workspace import registry
 from sma.workspace.workspace import POSITIONING, Workspace, WorkspaceError
 
@@ -30,11 +31,13 @@ strategy_app = typer.Typer(help="定位与策略", no_args_is_help=True)
 runs_app = typer.Typer(help="运行记录", no_args_is_help=True)
 package_app = typer.Typer(help="Agent 包", no_args_is_help=True)
 eval_app = typer.Typer(help="评测", no_args_is_help=True)
+browser_app = typer.Typer(help="账号专用的 Chrome（研究用，只读）", no_args_is_help=True)
 app.add_typer(account_app, name="account")
 app.add_typer(strategy_app, name="strategy")
 app.add_typer(runs_app, name="runs")
 app.add_typer(package_app, name="package")
 app.add_typer(eval_app, name="eval")
+app.add_typer(browser_app, name="browser")
 
 console = Console(highlight=False)
 ACCOUNT = typer.Option(None, "--account", "-a", help="账号工作区；不写就从当前目录往上找")
@@ -382,6 +385,34 @@ def eval_compare(batch_a: str, batch_b: str) -> None:
         table.add_row(row["case"], show[row["a"]], show[row["b"]], f"{show[row['a_first_pass']]} → {show[row['b_first_pass']]}",
                       "、".join(row["changed"]) or "-")
     console.print(table)
+
+
+# ---- 浏览器 ----
+@browser_app.command("open")
+def browser_open(platform: list[str] = typer.Option(list(PLATFORMS), "--platform", "-p", help="要登录的平台：xhs、dy、bili"),
+                 account: Path = ACCOUNT) -> None:
+    """打开这个账号的专用 Chrome，在里面登录平台账号（建议用小号）。"""
+    ws = _workspace(account)
+    unknown = [p for p in platform if p not in PLATFORMS]
+    if unknown:
+        console.print(f"[red]认不出的平台：{'、'.join(unknown)}（可选：{'、'.join(PLATFORMS)}）[/]")
+        raise typer.Exit(2)
+    try:
+        open_browser(ws.root, [PLATFORMS[p][1] for p in platform])
+    except BrowserError as exc:
+        console.print(f"[red]{escape(str(exc))}[/]")
+        raise typer.Exit(2) from exc
+    console.print(f"已打开 {ws.name} 的专用 Chrome（登录资料在 {ws.root / '.sma' / 'browser'}）。")
+    console.print(f"请在窗口里登录：{'、'.join(PLATFORMS[p][0] for p in platform)}。SMA 不输入密码、不扫码、不处理验证码。")
+    console.print("登录信息只留在这个资料目录里，不进备份和版本库。")
+
+
+@browser_app.command("status")
+def browser_status(account: Path = ACCOUNT) -> None:
+    """专用 Chrome 是否在运行。"""
+    ws = _workspace(account)
+    url = endpoint(ws.root)
+    console.print(f"{ws.name} 的专用 Chrome：" + ("运行中" if url else "没有运行（研究时 SMA 会自己打开）"))
 
 
 # ---- 检查 ----

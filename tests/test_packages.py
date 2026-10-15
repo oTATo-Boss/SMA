@@ -7,7 +7,7 @@ import pytest
 from sma.contracts.schemas import output_schema, strict_problems
 from sma.engines.routing import resolve
 from sma.orchestrator.context import MissingSkill, agents_md
-from sma.orchestrator.workflow import expand, load_workflow, parse_workflow
+from sma.orchestrator.workflow import expand, load_workflow, parse_workflow, resolve_choice
 from sma.packages import skills
 from sma.packages.loader import lint_package, list_packages, load_package
 from sma.paths import REPO_ROOT
@@ -77,11 +77,17 @@ def test_routing_order():
 
 def test_ideate_workflow_expands():
     workflow = load_workflow("ideate")
-    ids = [i.id for i in expand(workflow)]
-    assert ids == ["research[viral]", "research[adjacent]", "merge", "ideation[mechanism-borrow]", "ideation[cross-domain]", "ideation[original]"]
-    assert workflow.downstream("research") == {"merge", "ideation"}
-    assert expand(workflow)[0].slug == "research-viral"
-    assert expand(workflow)[3].params["candidates_range"] == [3, 4]
+    static = [i.id for i in expand(workflow)]
+    assert static[0] == "plan" and not any(i.startswith(("research", "ideation")) for i in static)   # 等规划结果
+    lanes = resolve_choice(workflow, "plan.research_lanes", [{"id": "viral", "focus": "温暖的"}])
+    methods = resolve_choice(workflow, "plan.ideation_methods", None)
+    instances = expand(workflow, {"plan.research_lanes": lanes, "plan.ideation_methods": methods})
+    assert [i.id for i in instances] == ["plan", "research[viral]", "merge", "ideation[mechanism-borrow]", "ideation[cross-domain]",
+                                         "ideation[original]", "blind", "review", "select", "rework", "direct", "rationale"]
+    assert instances[1].params["lane"] == {"id": "viral", "name": "本赛道爆款", "focus": "温暖的"}
+    assert instances[3].params["candidates_range"] == [3, 4]
+    assert resolve_choice(workflow, "plan.research_lanes", [{"id": "不存在"}]) == resolve_choice(workflow, "plan.research_lanes", None)
+    assert {"merge", "ideation", "blind", "review", "select", "rework", "direct", "rationale"} <= workflow.downstream("research")
 
 
 @pytest.mark.parametrize("text, message", [

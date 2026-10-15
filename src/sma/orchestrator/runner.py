@@ -1,11 +1,13 @@
-"""编排运行器（设计 03）：按步骤图调度，调用引擎，四层校验，修复重试，存产物，阻塞、续跑和取消。
+"""编排运行器（设计 03）：按步骤图调度，调用引擎，四层校验，修复重试，存产物；过线检查和返工循环；阻塞、续跑和取消。
 
 总控是代码：步骤、上限和策略都由流程定义和包的声明决定，模型只交产物。
+运行状态（每个 gate 走了几轮、最近的决定、正在进行的返工）存在 runs.params 里，续跑时接着用。
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
 import re
 import threading
 import time
@@ -15,7 +17,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 
 import sma
-from sma.contracts.envelope import SCHEMA_VERSION, Producer, make_envelope
+from sma.contracts.envelope import Producer, make_envelope, schema_version
 from sma.contracts.schemas import OutputSpec, envelope_schema, field_name
 from sma.contracts.validate import Context, hash_error, schema_errors, split_output, validate_content, validate_output
 from sma.engines.base import Engine
@@ -26,8 +28,9 @@ from sma.orchestrator.attempts import AttemptLog, StepJob, rule_params, run_atte
 from sma.orchestrator.code_steps import CODE_STEPS, CodeContext
 from sma.orchestrator.context import MissingSkill
 from sma.orchestrator.errors import Blocked, StepError
+from sma.orchestrator.gates import GATES, GateContext
 from sma.orchestrator.inputs import StepInputs, gather
-from sma.orchestrator.workflow import Instance, StepDef, Workflow, expand, parse_workflow, workflow_path
+from sma.orchestrator.workflow import Instance, StepDef, Workflow, expand, parse_workflow, resolve_choice, workflow_path
 from sma.packages.loader import Package, PackageError, load_package
 from sma.packages.skills import find_skill
 from sma.timeutil import compact, stamp
@@ -109,6 +112,12 @@ class Runner:
         except LockBusy as exc:
             raise RunBusy(f"运行 {run_id} 正在另一个进程里执行；等它结束，或先停掉它再续跑") from exc
 
+    def execute(self, run_id: str) -> str:
+        if self.db.get_run(run_id) is None:
+            raise ValueError(f"没有这次运行：{run_id}")
+        with self._run_lock(run_id):
+            return self._execute(run_id)
+
     def resume(self, run_id: str) -> str:
         """已成功且产物完好的步骤直接复用；其余的重跑，被重跑步骤的下游全部重跑。"""
         run = self.db.get_run(run_id)
@@ -120,39 +129,153 @@ class Runner:
             self._reset_for_resume(run_id)
             return self._execute(run_id)
 
+    # ---- 运行状态 ----
+    def _state(self, run_id: str) -> dict:
+        state = dict(self.db.get_run(run_id)["params"] or {})
+        state.setdefault("rounds", {})
+        state.setdefault("gates", {})
+        return state
+
+    def _save_state(self, run_id: str, state: dict) -> None:
+        self.db.update_run_params(run_id, state)
+
+    def _statuses(self, run_id: str) -> dict[str, str]:
+        """中断时正在运行、被取消或阻塞的步骤记为待运行。"""
+        return {r["step_id"]: r["status"] if r["status"] in FINISHED | {"skipped"} else "pending" for r in self.db.get_steps(run_id)}
+
+    def _expand(self, run_id: str, workflow: Workflow, status: dict[str, str]) -> list[Instance]:
+        dynamic: dict[str, list[dict] | None] = {}
+        for step in workflow.steps.values():
+            source = step.foreach.source if step.foreach else None
+            if source and source not in dynamic:
+                dynamic[source] = self._choice(run_id, workflow, source, status)
+        return expand(workflow, dynamic)
+
+    def _choice(self, run_id: str, workflow: Workflow, source: str, status: dict[str, str]) -> list[dict] | None:
+        """foreach.from 的取值：来源步骤成功就用它的结果，失败（且允许继续）就用默认值，还没结束就是 None。"""
+        name, _, field_ = source.partition(".")
+        state = status.get(name)
+        if state == "succeeded":
+            records = self.db.artifacts(run_id, name)
+            picked = None
+            if records:
+                content = json.loads((self.ws.root / records[0]["path"]).read_text(encoding="utf-8"))["content"]
+                picked = content.get(field_)
+            return resolve_choice(workflow, source, picked)
+        if state == "failed" and workflow.steps[name].on_fail.action == "continue":
+            return resolve_choice(workflow, source, None)
+        return None
+
+    @staticmethod
+    def _group(workflow: Workflow, instances: list[Instance]) -> dict[str, list[Instance]]:
+        return {name: [i for i in instances if i.step == name] for name in workflow.steps}
+
+    def _ensure_rows(self, run_id: str, workflow: Workflow, instances: list[Instance], status: dict[str, str]) -> None:
+        for inst in instances:
+            if inst.id in status:
+                continue
+            step = workflow.steps[inst.step]
+            initial = "skipped" if step.routed else "pending"
+            if self.db.get_step(run_id, inst.id) is None:
+                self.db.upsert_step(run_id, inst.id, kind="code" if step.code else "agent", agent=step.agent or step.code,
+                                    params=inst.params, status=initial)
+            status[inst.id] = initial
+
+    def _group_state(self, workflow: Workflow, by_step: dict[str, list[Instance]], status: dict[str, str], state: dict, name: str) -> str:
+        step = workflow.steps[name]
+        instances = by_step.get(name, [])
+        if not instances:
+            return "waiting"                      # foreach.from 的来源还没有结果
+        states = [status.get(i.id, "pending") for i in instances]
+        if step.routed:
+            return "skipped" if states == ["skipped"] else {"pending": "open", "running": "open"}.get(states[0], states[0])
+        ok = states.count("succeeded")
+        open_ = sum(1 for s in states if s not in FINISHED)
+        if ok + open_ < step.required_successes(len(instances)):
+            return "failed"
+        if open_:
+            return "open"
+        if step.gate and state["gates"].get(name) != "proceed":
+            return "open"                         # 还没过 gate，或者正在返工、重出
+        return "succeeded"
+
+    def _needs_met(self, workflow: Workflow, by_step, status, state, inst: Instance) -> bool:
+        step = workflow.steps[inst.step]
+        for need in step.needs:
+            if step.routed:
+                # 被 gate 路由的步骤只要上游的实例都成功了就能跑（上游的 gate 此时正等着它）
+                if not by_step.get(need) or any(status.get(i.id) != "succeeded" for i in by_step[need]):
+                    return False
+                continue
+            group = self._group_state(workflow, by_step, status, state, need)
+            if group == "succeeded" or (group == "failed" and workflow.steps[need].on_fail.action == "continue"):
+                continue
+            return False
+        return True
+
+    def _reset(self, run_id: str, workflow: Workflow, status: dict[str, str], state: dict, by_step: dict[str, list[Instance]],
+               steps: set[str], keep: set[str] = frozenset()) -> list[str]:
+        """把这些步骤重置为待运行；routed 步骤回到跳过并撤下产物；清掉这些步骤的 gate 决定。
+        不撤普通步骤的产物登记：下一轮要读上一轮的评审意见，步骤真正开始时才撤。"""
+        reset = []
+        for name in steps:
+            step = workflow.steps[name]
+            for inst in by_step.get(name, []):
+                if inst.id in keep:
+                    continue
+                new = "skipped" if step.routed else "pending"
+                status[inst.id] = new
+                self.db.upsert_step(run_id, inst.id, status=new, error=None)
+                if step.routed:
+                    self.db.delete_step_artifacts(run_id, inst.id)
+                reset.append(inst.id)
+            if name not in keep:
+                state["gates"].pop(name, None)
+                if step.routed and (state.get("route") or {}).get("after") == name:
+                    state.pop("route", None)
+                    state.pop("rework_target", None)
+        return reset
+
     def _reset_for_resume(self, run_id: str) -> None:
         workflow = self.workflow_of(run_id)
-        by_step = self._by_step(workflow)
-        reset: set[str] = set()
+        state = self._state(run_id)
+        status = self._statuses(run_id)
+        by_step = self._group(workflow, self._expand(run_id, workflow, status))
+        route = state.get("route") or {}
+        rerun: set[str] = set()
         dirty: set[str] = set()
         for name, instances in by_step.items():
-            states = {i.id: (self.db.get_step(run_id, i.id) or {}).get("status", "pending") for i in instances}
+            step = workflow.steps[name]
+            states = {i.id: status.get(i.id, "pending") for i in instances}
+            if step.routed:
+                if route.get("after") == name and any(s != "succeeded" for s in states.values()):
+                    rerun |= set(states)          # 中断时正在返工：接着返工
+                continue
             broken = {i for i, s in states.items() if s == "succeeded" and not self._artifacts_intact(run_id, i)}
             ok = sum(1 for i, s in states.items() if s == "succeeded" and i not in broken)
             open_ = any(s not in FINISHED for s in states.values())
-            if broken or open_ or ok < workflow.steps[name].required_successes:
+            if instances and (broken or open_ or ok < step.required_successes(len(instances))):
                 dirty.add(name)
-                reset |= broken | {i for i, s in states.items() if s != "succeeded"}
+                rerun |= broken | {i for i, s in states.items() if s != "succeeded"}
+        for inst_id in rerun:
+            status[inst_id] = "pending"
+            self.db.upsert_step(run_id, inst_id, status="pending", error=None)
+        downstream = set().union(*(workflow.downstream(name) for name in dirty)) if dirty else set()
+        reset = self._reset(run_id, workflow, status, state, by_step, downstream - dirty)
         for name in dirty:
-            for down in workflow.downstream(name):
-                reset |= {i.id for i in by_step[down]}
-        for inst_id in sorted(reset):
-            if self.db.get_step(run_id, inst_id):
-                self.db.upsert_step(run_id, inst_id, status="pending", error=None)
-            self.db.delete_step_artifacts(run_id, inst_id)
-        self._emit("resume", run=run_id, rerun=sorted(reset))
+            state["gates"].pop(name, None)
+        for name, decision in list(state["gates"].items()):
+            if decision == "block":           # 续跑 = 再判断一次；轮数用完的重新计轮，再给一次机会
+                state["gates"].pop(name)
+                state["rounds"][name] = 0
+        self._save_state(run_id, state)
+        self._emit("resume", run=run_id, rerun=sorted(rerun | set(reset)))
 
-    def execute(self, run_id: str) -> str:
-        if self.db.get_run(run_id) is None:
-            raise ValueError(f"没有这次运行：{run_id}")
-        with self._run_lock(run_id):
-            return self._execute(run_id)
-
+    # ---- 调度 ----
     def _execute(self, run_id: str) -> str:
         run = self.db.get_run(run_id)
         workflow = self.workflow_of(run_id)
-        instances = expand(workflow)
-        by_step = self._by_step(workflow)
+        state = self._state(run_id)
         self.db.set_run_status(run_id, "running")
         self._emit("run-start", run=run_id, task=run["task"])
         before = snapshot(self.ws.root)
@@ -163,26 +286,35 @@ class Runner:
         except StepError as exc:
             return self._finish(run_id, before, "failed", error=str(exc), status={})
 
-        status = self._load_status(run_id, workflow, instances)
+        status = self._statuses(run_id)
         limit = self.ws.config.autonomy.max_parallel_steps
         running: dict[Future, Instance] = {}
         halt: tuple | None = None
+        by_step: dict[str, list[Instance]] = {}
         with ThreadPoolExecutor(max_workers=limit, thread_name_prefix="sma-step") as pool:
             while True:
                 try:
+                    instances = self._expand(run_id, workflow, status)
+                    by_step = self._group(workflow, instances)
+                    self._ensure_rows(run_id, workflow, instances, status)
+                    if halt is None:
+                        blocked = self._advance(run_id, workflow, status, state, by_step)
+                        if blocked is not None:
+                            halt = ("blocked", blocked[0], blocked[1])
                     if self.cancel.is_set() and halt is None:
                         halt = ("cancelled",)
                     if halt is None:
                         for inst in instances:
                             if len(running) >= limit:
                                 break
-                            if status[inst.id] == "pending" and self._needs_met(workflow, by_step, status, inst):
+                            if status[inst.id] == "pending" and self._needs_met(workflow, by_step, status, state, inst):
                                 status[inst.id] = "running"
                                 self.db.upsert_step(run_id, inst.id, status="running", started_at=stamp(), finished_at=None, error=None)
-                                sources = {need: [i.id for i in by_step[need] if status[i.id] == "succeeded"]
-                                           for need in workflow.steps[inst.step].needs}
+                                step = workflow.steps[inst.step]
+                                sources = {need: [i.id for i in by_step.get(need, []) if status[i.id] == "succeeded"] for need in step.needs}
+                                all_ids = {name: [i.id for i in group] for name, group in by_step.items()}
                                 self._emit("step-start", step=inst.id)
-                                running[pool.submit(self._run_step, run, workflow, inst, sources)] = inst
+                                running[pool.submit(self._run_step, run, workflow, inst, sources, all_ids, dict(state))] = inst
                     if not running:
                         break
                     done, _ = wait(list(running), timeout=0.5, return_when=FIRST_COMPLETED)
@@ -199,59 +331,91 @@ class Runner:
                     self._emit("step-end", step=inst.id, status=outcome.status, duration_s=outcome.duration_s, error=outcome.error)
                     if halt is not None:
                         continue
+                    step = workflow.steps[inst.step]
                     if outcome.status == "blocked":
-                        halt = ("blocked", inst, outcome.blocked)
-                    elif outcome.status == "failed" and self._group_state(workflow, by_step, status, inst.step) == "failed":
+                        halt = ("blocked", inst.id, outcome.blocked)
+                    elif outcome.status == "failed" and step.on_fail.action != "continue" and (
+                            step.routed or self._group_state(workflow, by_step, status, state, inst.step) == "failed"):
                         halt = ("failed", inst)
 
         if halt is None:
-            if all(self._group_state(workflow, by_step, status, name) == "succeeded" for name in workflow.steps):
+            if self._all_done(workflow, by_step, status, state):
                 return self._finish(run_id, before, "succeeded", status=status)
             return self._finish(run_id, before, "failed", error="有步骤没有完成", status=status)
         if halt[0] == "cancelled":
             return self._finish(run_id, before, "cancelled", status=status)
         if halt[0] == "blocked":
-            inst, blocked = halt[1], halt[2]
-            return self._finish(run_id, before, "blocked", blocked=blocked, step_id=inst.id, status=status)
+            return self._finish(run_id, before, "blocked", blocked=halt[2], step_id=halt[1], status=status)
         inst = halt[1]
         step = workflow.steps[inst.step]
-        error = f"步骤 {inst.step} 失败：{(self.db.get_step(run_id, inst.id) or {}).get('error')}"
+        error = f"步骤 {inst.id} 失败：{(self.db.get_step(run_id, inst.id) or {}).get('error')}"
         if step.on_fail.action == "block":
-            blocked = Blocked(step.on_fail.reason, [f"查看原因：sma runs show {run_id} --step {inst.id}", "处理后续跑"], error)
+            blocked = Blocked(step.on_fail.reason, [f"查看原因：sma runs show {run_id} --step {inst.slug}", "处理后续跑"], error)
             return self._finish(run_id, before, "blocked", blocked=blocked, step_id=inst.id, status=status)
         return self._finish(run_id, before, "failed", error=error, status=status)
 
-    # ---- 调度 ----
-    @staticmethod
-    def _by_step(workflow: Workflow) -> dict[str, list[Instance]]:
-        instances = expand(workflow)
-        return {name: [i for i in instances if i.step == name] for name in workflow.steps}
+    def _all_done(self, workflow: Workflow, by_step, status, state) -> bool:
+        for name, step in workflow.steps.items():
+            group = self._group_state(workflow, by_step, status, state, name)
+            if group in {"succeeded", "skipped"} or (group == "failed" and step.on_fail.action == "continue"):
+                continue
+            return False
+        return True
 
-    def _load_status(self, run_id: str, workflow: Workflow, instances: list[Instance]) -> dict[str, str]:
-        status = {}
-        for inst in instances:
-            row = self.db.get_step(run_id, inst.id)
-            if row is None:
-                step = workflow.steps[inst.step]
-                self.db.upsert_step(run_id, inst.id, kind="code" if step.code else "agent", agent=step.agent or step.code,
-                                    params=inst.params, status="pending")
-                status[inst.id] = "pending"
-            else:
-                # 中断时正在运行、被取消或阻塞的步骤重跑
-                status[inst.id] = row["status"] if row["status"] in FINISHED else "pending"
-        return status
+    def _advance(self, run_id: str, workflow: Workflow, status, state, by_step) -> tuple[str, Blocked] | None:
+        """返工完成就按路由重跑；做完的 gate 步骤还没判断的，判断它往哪走。返回阻塞（步骤 id, 原因）或 None。"""
+        changed = False
+        route = state.get("route")
+        if route:
+            routed = by_step.get(route["after"], [])
+            if routed and all(status.get(i.id) == "succeeded" for i in routed):
+                steps = {route["rerun_from"], *workflow.downstream(route["rerun_from"])}
+                self._reset(run_id, workflow, status, state, by_step, steps, keep={i.id for i in routed} | {route["after"]})
+                state.pop("route", None)
+                self._emit("route", step=route["after"], rerun=sorted(steps))
+                changed = True
+        result = None
+        for name, step in workflow.steps.items():
+            instances = by_step.get(name, [])
+            if not step.gate or name in state["gates"] or not instances or any(status.get(i.id) != "succeeded" for i in instances):
+                continue
+            outputs: dict[str, list[dict]] = {}
+            for record in self.db.artifacts(run_id, instances[0].id):
+                content = json.loads((self.ws.root / record["path"]).read_text(encoding="utf-8"))["content"]
+                outputs.setdefault(record["type"], []).append(content)
+            rounds = state["rounds"].get(name, 0)
+            decision = GATES[step.gate](GateContext(run_id, name, outputs, rounds, self._max_rounds(step), step.gate_params))
+            self.db.add_check(f"run:{run_id}", f"gate:{name}", decision.action, decision.note or decision.reason)
+            self._emit("gate", step=name, action=decision.action, note=decision.note, round=rounds + 1)
+            changed = True
+            if decision.action == "proceed":
+                state["gates"][name] = "proceed"
+            elif decision.action == "block":
+                state["gates"][name] = "block"
+                result = (instances[0].id, Blocked(decision.reason, decision.needed, decision.detail))
+                break
+            elif decision.action == "rework":
+                state["rounds"][name] = rounds + 1
+                state["gates"][name] = "rework"
+                state.update(decision.state)
+                state["route"] = {"after": decision.routed_step, "rerun_from": decision.rerun_from}
+                for inst in by_step.get(decision.routed_step, []):
+                    status[inst.id] = "pending"
+                    self.db.upsert_step(run_id, inst.id, status="pending", error=None)
+            elif decision.action == "rerun":
+                state["rounds"][name] = rounds + 1
+                state.pop("rework_target", None)
+                steps = {decision.rerun_from, *workflow.downstream(decision.rerun_from)}
+                self._reset(run_id, workflow, status, state, by_step, steps)
+        if changed:
+            self._save_state(run_id, state)
+        return result
 
-    @staticmethod
-    def _group_state(workflow: Workflow, by_step: dict[str, list[Instance]], status: dict[str, str], name: str) -> str:
-        states = [status[i.id] for i in by_step[name]]
-        ok = states.count("succeeded")
-        open_ = sum(1 for s in states if s not in FINISHED)
-        if ok + open_ < workflow.steps[name].required_successes:
-            return "failed"
-        return "succeeded" if open_ == 0 else "open"
-
-    def _needs_met(self, workflow: Workflow, by_step, status, inst: Instance) -> bool:
-        return all(self._group_state(workflow, by_step, status, need) == "succeeded" for need in workflow.steps[inst.step].needs)
+    def _max_rounds(self, step: StepDef) -> int:
+        value = step.gate_params.get("max_rounds", 0)
+        if isinstance(value, str) and value.startswith("autonomy."):
+            return int(getattr(self.ws.config.autonomy, value.split(".", 1)[1]))
+        return int(value)
 
     def _outcome(self, run_id: str, inst: Instance, future: Future) -> Outcome:
         try:
@@ -271,7 +435,9 @@ class Runner:
             raise Blocked("positioning-unconfirmed", ["在 strategy/positioning.md 写好定位", '本人确认后运行：sma strategy confirm --note "<本人原话>"'],
                           "定位还没确认，或确认之后定位文件又改过")
         engines: set[str] = set()
-        for step in workflow.steps.values():
+        for name, step in workflow.steps.items():
+            if step.gate and step.gate not in GATES:
+                raise StepError(f"步骤 {name} 的 gate {step.gate} 不存在")
             if step.code:
                 if step.code not in CODE_STEPS:
                     raise StepError(f"流程里的代码步骤 {step.code} 不存在")
@@ -297,24 +463,29 @@ class Runner:
         self.db.add_check(f"run:{run_id}", "precheck", "pass", "定位已确认，包、技能和引擎可用")
 
     # ---- 步骤执行 ----
-    def _run_step(self, run: dict, workflow: Workflow, inst: Instance, sources: dict[str, list[str]]) -> Outcome:
+    def _run_step(self, run: dict, workflow: Workflow, inst: Instance, sources: dict[str, list[str]], all_ids: dict[str, list[str]],
+                  state: dict) -> Outcome:
         started = time.time()
-        self.db.delete_step_artifacts(run["id"], inst.id)
         step = workflow.steps[inst.step]
         try:
-            inputs = gather(self.ws, run["id"], workflow, inst, sources)
-            outcome = self._run_code(run, step, inst, inputs) if step.code else self._run_agent(run, step, inst, inputs)
+            inputs = gather(self.ws, run["id"], workflow, inst, sources, all_ids)
+            self.db.delete_step_artifacts(run["id"], inst.id)      # 读完输入再撤自己的旧登记（自己的旧产物可能是别人的 feedback）
+            outcome = self._run_code(run, step, inst, inputs, state) if step.code else self._run_agent(run, step, inst, inputs)
         except (StepError, MissingSkill) as exc:
             outcome = Outcome("failed", error=str(exc))
         outcome.duration_s = time.time() - started
         return outcome
 
-    def _run_code(self, run: dict, step: StepDef, inst: Instance, inputs: StepInputs) -> Outcome:
+    @staticmethod
+    def _contents(inputs: StepInputs) -> dict[str, list[dict]]:
+        return {t: [a.content for a in items] for t, items in inputs.artifacts.items()}
+
+    def _run_code(self, run: dict, step: StepDef, inst: Instance, inputs: StepInputs, state: dict) -> Outcome:
         fn = CODE_STEPS[step.code]
-        parts = fn(CodeContext(self.ws, run["id"], inst, inputs.artifacts))
+        parts = fn(CodeContext(self.ws, run["id"], inst, inputs.artifacts, state))
         specs = [OutputSpec(o.type, o.many) for o in step.outputs]
         output = {field_name(s.type, s.many): parts.get(s.type, []) if s.many else (parts.get(s.type) or [None])[0] for s in specs}
-        problems = validate_output(specs, output, Context(params=rule_params(inst.params), resolver=self.ws))
+        problems = validate_output(specs, output, Context(params=rule_params(inst.params), resolver=self.ws, inputs=self._contents(inputs)))
         if problems:
             return Outcome("failed", engine="code", error="代码步骤的产物没过校验：" + "；".join(problems[:10]))
         self._store(run["id"], inst, split_output(specs, output), specs, Producer(f"code:{step.code}", sma.__version__, "code", None), inputs.refs)
@@ -324,12 +495,13 @@ class Runner:
         package = self.package(step.agent)
         route = resolve(package, self.ws.config, list(self.engines), self.user_models)
         run_id = run["id"]
+        params = {**package.spec.params, **inst.params}
         first_n = max((a["n"] for a in self.db.list_attempts(run_id, inst.id)), default=0) + 1
         job = StepJob(label=inst.id, package=package, route=route, engine=self.engines[route.engine],
                       step_dir=self.ws.run_dir(run_id) / "steps" / inst.slug, first_n=first_n, task=run["task"],
-                      params=inst.params, rule_params=rule_params(inst.params), inputs=inputs.files, extra_paths=inputs.paths,
+                      params=params, rule_params=rule_params(params), inputs=inputs.files, extra_paths=inputs.paths,
                       memory=self._memory(package), resolver=self.ws, run_label=f"{self.ws.name} · {run_id} · {inst.id}",
-                      extra_checks=self._isolation_problems)
+                      extra_checks=self._isolation_problems, rule_inputs=self._contents(inputs))
 
         def on_start(n: int, attempt_dir) -> None:
             self.db.add_attempt(run_id, inst.id, n, attempt_dir.relative_to(self.ws.root).as_posix())
@@ -381,7 +553,7 @@ class Runner:
                     raise RuntimeError(f"信封不合格（编排层的问题）：{problems}")
                 path = directory / f"{artifact_type}{f'-{idx}' if idx else ''}.v{version}.json"
                 path.write_text(redact_text(canonical_json(envelope), self._secrets), encoding="utf-8")
-                self.db.add_artifact(envelope["id"], run_id, inst.id, artifact_type, SCHEMA_VERSION, version,
+                self.db.add_artifact(envelope["id"], run_id, inst.id, artifact_type, schema_version(artifact_type), version,
                                      path.relative_to(self.ws.root).as_posix(), sha256_file(path))
                 ids.append(envelope["id"])
         return ids

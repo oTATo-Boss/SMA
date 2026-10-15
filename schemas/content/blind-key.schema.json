@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/blind-key",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "entries"
+  ],
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blind_id",
+          "step",
+          "method",
+          "candidate",
+          "artifact"
+        ],
+        "properties": {
+          "blind_id": {
+            "type": "string",
+            "description": "盲化后的代号"
+          },
+          "step": {
+            "type": "string",
+            "description": "产出它的步骤实例"
+          },
+          "method": {
+            "type": "string",
+            "description": "创意方法"
+          },
+          "candidate": {
+            "type": "string",
+            "description": "原来的候选代号"
+          },
+          "artifact": {
+            "type": "string",
+            "description": "原来的产物 id"
+          }
+        }
+      }
+    }
+  },
+  "description": "盲化对照表：编排层生成，评审看不到"
+}

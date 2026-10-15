@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/production-plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idea",
+    "experience",
+    "style",
+    "assets",
+    "sound",
+    "risks"
+  ],
+  "properties": {
+    "idea": {
+      "type": "string",
+      "description": "一句话创意，和选中的候选一致"
+    },
+    "experience": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "first_second",
+        "third_second",
+        "turn",
+        "payoff"
+      ],
+      "properties": {
+        "first_second": {
+          "type": "string",
+          "description": "第 1 秒看到什么"
+        },
+        "third_second": {
+          "type": "string",
+          "description": "第 3 秒为什么不划走"
+        },
+        "turn": {
+          "type": "string",
+          "description": "转折或高潮在哪"
+        },
+        "payoff": {
+          "type": "string",
+          "description": "结尾怎么回报"
+        }
+      },
+      "description": "观众体验"
+    },
+    "style": {
+      "type": "string",
+      "description": "画面风格、色调、节奏"
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "source",
+          "ref",
+          "notes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "资产名，镜头表里引用它"
+          },
+          "source": {
+            "enum": [
+              "fixed",
+              "generate",
+              "code",
+              "shoot",
+              "stock"
+            ],
+            "description": "fixed：固定资产；generate：AI 生成；code：代码动画；shoot：实拍；stock：有许可的素材库"
+          },
+          "ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "source 为 fixed 时写 固定资产/ 下的相对路径；其他写 null"
+          },
+          "notes": {
+            "type": "string",
+            "description": "要求，例如角色的固定特征"
+          }
+        }
+      }
+    },
+    "sound": {
+      "type": "string",
+      "description": "音效、音乐、台词或字幕怎么推动节奏"
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "制作风险和应对"
+    }
+  },
+  "description": "制作方案"
+}

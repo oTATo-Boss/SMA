@@ -166,5 +166,14 @@ class Workspace:
         except (OSError, ValueError):       # 例如路径里有空字符
             return False
 
+    def has_asset(self, relative_path: str) -> bool:
+        """固定资产/ 下的文件（只读）。"""
+        base = (self.root / "固定资产").resolve()
+        try:
+            path = (base / relative_path.removeprefix("固定资产/")).resolve()
+            return path.is_relative_to(base) and path.is_file()
+        except (OSError, ValueError):
+            return False
+
     def run_dir(self, run_id: str) -> Path:
         return self.root / "runs" / run_id

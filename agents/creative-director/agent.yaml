@@ -1,12 +1,14 @@
 id: creative-director
 name: 创意总监
-version: 0.2.0
+version: 0.3.0
 description: 按指定的一种创意方法，基于机会简报和爆款条目，独立产出 3–4 个机制不同的创意候选
 kind: worker
 inputs:
   - { type: strategy, required: true }
   - { type: opportunity-brief, required: true }
   - { type: viral-reference, required: false, many: true }
+  - { type: idea-review, required: false }        # 重出一轮时的评审意见；返工时的评审结论
+  - { type: selected-idea, required: false }      # 返工时：选中的候选
 outputs:
   - { type: idea-candidates }
 engine:

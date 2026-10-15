@@ -27,14 +27,23 @@ def steps(ws: Workspace, run_id: str) -> dict[str, dict]:
     return {row["step_id"]: row for row in ws.db.get_steps(run_id)}
 
 
+def read_artifact(ws: Workspace, run_id: str, step_id: str, artifact_type: str) -> dict:
+    record = ws.db.artifacts(run_id, step_id, artifact_type)[-1]
+    return json.loads((ws.root / record["path"]).read_text(encoding="utf-8"))["content"]
+
+
 def test_happy_path(workspace):
     r, engine = runner(workspace)
     run_id, status = r.run("ideate", "今天做一条视频")
     assert status == "succeeded"
     rows = steps(workspace, run_id)
-    assert all(row["status"] == "succeeded" for row in rows.values()) and len(rows) == 6
-    assert engine.calls == {"research[viral]": 1, "research[adjacent]": 1, "ideation[mechanism-borrow]": 1,
-                            "ideation[cross-domain]": 1, "ideation[original]": 1}
+    assert {k: v["status"] for k, v in rows.items()} == {
+        "plan": "succeeded", "research[viral]": "succeeded", "research[adjacent]": "succeeded", "merge": "succeeded",
+        "ideation[mechanism-borrow]": "succeeded", "ideation[cross-domain]": "succeeded", "ideation[original]": "succeeded",
+        "blind": "succeeded", "review": "succeeded", "select": "succeeded", "rework": "skipped", "direct": "succeeded",
+        "rationale": "succeeded"}
+    assert engine.calls == {"plan": 1, "research[viral]": 1, "research[adjacent]": 1, "ideation[mechanism-borrow]": 1,
+                            "ideation[cross-domain]": 1, "ideation[original]": 1, "review": 1, "direct": 1}
 
     # 爆款条目入库并按链接去重：两路各 1 条独有 + 1 条共同 = 3 条
     library = workspace.library_entries()
@@ -67,7 +76,19 @@ def test_happy_path(workspace):
         "merge.opportunity-brief.json", "merge.viral-reference.json",
         "strategy-content-rules.md", "strategy-facts.md", "strategy-positioning.md"]
     checks = {c["name"]: c["result"] for c in workspace.db.checks(f"run:{run_id}")}
-    assert checks == {"precheck": "pass", "workspace-isolation": "pass"}
+    assert checks == {"precheck": "pass", "gate:plan": "proceed", "gate:select": "proceed", "workspace-isolation": "pass"}
+
+    # 评审是盲评：输入里没有方法标签，代号重编过；选定后解开盲化；依据卡写好了
+    blinded = read_artifact(workspace, run_id, "blind", "blinded-candidates")
+    assert all(c["id"].startswith("X") for c in blinded["candidates"]) and len(blinded["candidates"]) == 9
+    review_inputs = workspace.run_dir(run_id) / "steps" / "review" / "attempt-1" / "inputs"
+    assert "method" not in (review_inputs / "blind.blinded-candidates.json").read_text(encoding="utf-8")
+    selected = read_artifact(workspace, run_id, "select", "selected-idea")
+    assert selected["blind_id"] == "X1" and selected["candidate"]["id"].startswith("C") and not selected["explore"]
+    rationale = read_artifact(workspace, run_id, "rationale", "delivery-rationale")
+    assert rationale["pick"]["one_liner"] == selected["candidate"]["one_liner"] and rationale["independence"] == "same-family"
+    card = (workspace.run_dir(run_id) / "依据卡.md").read_text(encoding="utf-8")
+    assert selected["candidate"]["one_liner"] in card and "同家族评审" in card
 
 
 def test_invalid_output_is_repaired(workspace):
@@ -199,7 +220,7 @@ def test_cancel_then_resume(workspace):
     started = time.time()
     assert r.execute(run_id) == "cancelled"
     assert time.time() - started < 5
-    assert all(row["status"] == "pending" for row in steps(workspace, run_id).values())
+    assert {row["status"] for row in steps(workspace, run_id).values()} <= {"pending", "skipped"}
     r.cancel.clear()
     r2, _ = runner(workspace)
     assert r2.resume(run_id) == "succeeded"
@@ -214,7 +235,7 @@ def test_resume_after_crash(workspace):
         workspace.db.upsert_step(run_id, step_id, status="running")
     r2, engine2 = runner(workspace)
     assert r2.resume(run_id) == "succeeded"
-    assert engine2.calls == {"ideation[original]": 1, "ideation[cross-domain]": 1}
+    assert engine2.calls == {"ideation[original]": 1, "ideation[cross-domain]": 1, "review": 1, "direct": 1}
 
 
 def test_parallel_limit(workspace):

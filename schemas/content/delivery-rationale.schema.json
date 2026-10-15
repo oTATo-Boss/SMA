@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/delivery-rationale",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task",
+    "pick",
+    "review",
+    "evidence",
+    "models",
+    "independence",
+    "notes"
+  ],
+  "properties": {
+    "task": {
+      "type": "string"
+    },
+    "pick": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "one_liner",
+        "method",
+        "explore",
+        "step"
+      ],
+      "properties": {
+        "one_liner": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "explore": {
+          "type": "boolean"
+        },
+        "step": {
+          "type": "string"
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "rounds",
+        "risks",
+        "summary"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer"
+        },
+        "rounds": {
+          "type": "integer"
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ref",
+          "url",
+          "outlier_ratio",
+          "evidence_ids"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outlier_ratio": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "agent",
+          "engine",
+          "model"
+        ],
+        "properties": {
+          "step": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "engine": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "independence": {
+      "enum": [
+        "different-family",
+        "same-family",
+        "unknown"
+      ],
+      "description": "评审和创意是否用了不同的模型家族"
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "description": "依据卡：编排层生成"
+}

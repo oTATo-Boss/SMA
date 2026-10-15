@@ -16,7 +16,7 @@ from jsonschema import Draft202012Validator
 
 from sma.contracts.schemas import OutputSpec, content_schema, field_name
 from sma.hashing import sha256_file
-from sma.urls import unseen_urls  # noqa: F401  对外沿用 validate.unseen_urls
+from sma.urls import normalize_url, unseen_urls
 
 URL = re.compile(r"^https?://\S+$")
 
@@ -24,24 +24,39 @@ URL = re.compile(r"^https?://\S+$")
 class EvidenceResolver(Protocol):
     def has_library(self, entry_id: str) -> bool: ...
     def has_data(self, relative_path: str) -> bool: ...
+    def has_asset(self, relative_path: str) -> bool: ...
 
 
 @dataclass
 class Context:
-    """语义规则需要的上下文：步骤参数、同一次输出里的爆款代号等。"""
+    """语义规则需要的上下文：步骤参数、同一次输出里的爆款代号、本步骤拿到的上游产物、研究工具的证据台账。"""
 
     params: dict = field(default_factory=dict)
     local_refs: set[str] = field(default_factory=set)
     resolver: EvidenceResolver | None = None
+    inputs: dict[str, list[dict]] = field(default_factory=dict)     # 类型 → 内容
+    ledger: dict[str, dict] | None = None                           # 台账编号 → 记录；没用研究工具时为 None
 
 
 SemanticRule = Callable[[dict, Context], list[str]]
+CrossRule = Callable[[dict[str, list[dict]], Context], list[str]]
 _RULES: dict[str, list[SemanticRule]] = {}
+_CROSS_RULES: list[tuple[tuple[str, ...], CrossRule]] = []
 
 
 def rule(artifact_type: str):
     def register(fn: SemanticRule) -> SemanticRule:
         _RULES.setdefault(artifact_type, []).append(fn)
+        return fn
+
+    return register
+
+
+def cross_rule(*artifact_types: str):
+    """同一步骤交出的几种产物之间的规则，例如镜头表引用的资产要在制作方案里。"""
+
+    def register(fn: CrossRule) -> CrossRule:
+        _CROSS_RULES.append((artifact_types, fn))
         return fn
 
     return register
@@ -112,6 +127,9 @@ def validate_output(outputs: list[OutputSpec], output: dict, ctx: Context) -> li
             problems += [f"{where} {p}" for p in validate_content(artifact_type, content, ctx)]
             for location, ref in located_refs(content, where):
                 problems += [f"[证据] {p}" for p in evidence_errors([ref], ctx, location)]
+    for types, check in _CROSS_RULES:
+        if all(parts.get(t) for t in types):
+            problems += [f"[规则] {p}" for p in check(parts, ctx)]
     return list(dict.fromkeys(problems))      # 同一个问题只报一次
 
 
@@ -218,3 +236,150 @@ def _idea_candidates(content: dict, ctx: Context) -> list[str]:
         if len(c["beats"]) < 2:
             problems.append(f"候选 {c['id']} 的节拍太少，至少 2 拍")
     return problems
+
+
+@rule("viral-reference")
+def _viral_reference_ledger(content: dict, ctx: Context) -> list[str]:
+    """用了研究工具时（有台账），条目的链接、指标、看没看过画面都要和台账对得上。"""
+    if ctx.ledger is None:
+        return []
+    ids = content["evidence_ids"]
+    if not ids:
+        return ["用了研究工具时，每条爆款都要写台账编号 evidence_ids"]
+    problems = [f"台账里没有编号 {i}" for i in ids if i not in ctx.ledger]
+    records = [ctx.ledger[i] for i in ids if i in ctx.ledger]
+    if not records:
+        return problems
+    seen = "\n".join(str(r.get("url", "")) + "\n" + str(r.get("data", "")) for r in records)
+    if unseen_urls([content["url"]], seen):
+        problems.append(f"台账 {ids} 里找不到这条作品的链接 {content['url']}")
+    captured: dict[str, float] = {}
+    for record in records:
+        captured.update({k: v for k, v in (record.get("metrics") or {}).items() if isinstance(v, (int, float))})
+    for metric in content["metrics"]:
+        value, recorded = metric["value_number"], captured.get(metric["name"])
+        if value is not None and recorded is not None and abs(value - recorded) > max(1.0, abs(recorded) * 0.01):
+            problems.append(f"指标「{metric['name']}」写的是 {value}，台账里是 {recorded}；只写台账里看到的数")
+    if content["media_reviewed"]:
+        target = normalize_url(content["url"])
+        played = [r for r in ctx.ledger.values() if r.get("tool") == "playback_frames" and r.get("frames")
+                  and (normalize_url(str(r.get("url", ""))) == target or not unseen_urls([content["url"]], str(r.get("url", ""))))]
+        if not played:
+            problems.append("media_reviewed 写了 true，但台账里没有这条作品的播放截图；没看过就写 false")
+    return problems
+
+
+@rule("run-plan")
+def _run_plan(content: dict, ctx: Context) -> list[str]:
+    if content["intent"] == "direction-change":
+        restatement = content["restatement"]
+        return [] if restatement and restatement["questions"] else ["intent 是 direction-change 时要写 restatement，questions 至少一条"]
+    if content["intent"] != "content":
+        return []
+    problems = []
+    for field_name_, spec in (ctx.params.get("choices") or {}).items():
+        allowed = [v["id"] for v in spec["values"]]
+        picked = [x["id"] if isinstance(x, dict) else x for x in content.get(field_name_, [])]
+        low, high = spec.get("min", 1), spec.get("max", len(allowed))
+        if not low <= len(picked) <= high:
+            problems.append(f"{field_name_} 要选 {low} 到 {high} 个，现在是 {len(picked)} 个")
+        unknown = [x for x in picked if x not in allowed]
+        if unknown:
+            problems.append(f"{field_name_} 里有不在可选范围的 {unknown}；只能从 {allowed} 里选")
+        if len(set(picked)) != len(picked):
+            problems.append(f"{field_name_} 有重复")
+    return problems
+
+
+THRESHOLDS = {"pass_total": 25, "min_dimension": 3, "min_consistency": 4}
+
+
+@rule("idea-review")
+def _idea_review(content: dict, ctx: Context) -> list[str]:
+    problems = []
+    if content["blind"] is not True:
+        problems.append("blind 要写 true：评审按盲评做")
+    scores = {s["candidate"]: s for s in content["scores"]}
+    if len(scores) != len(content["scores"]):
+        problems.append("同一个候选打了不止一次分")
+    given = [c["id"] for batch in ctx.inputs.get("blinded-candidates", []) for c in batch["candidates"]]
+    if given:
+        missing, unknown = sorted(set(given) - set(scores)), sorted(set(scores) - set(given))
+        if missing:
+            problems.append(f"这些候选没有打分：{missing}")
+        if unknown:
+            problems.append(f"打分里有输入里没有的候选：{unknown}")
+    for cid, score in scores.items():
+        if sum(score["dimensions"].values()) != score["total"]:
+            problems.append(f"{cid} 的 total 应该是 7 项之和 {sum(score['dimensions'].values())}，现在写的是 {score['total']}")
+    pick, explore = content["pick"], content["explore_pick"]
+    if pick not in scores:
+        problems.append(f"pick {pick!r} 不是打过分的候选")
+    if explore is not None and (explore not in scores or explore == pick):
+        problems.append(f"explore_pick {explore!r} 要是另一个打过分的候选，没有就写 null")
+    flagged = {f["candidate"] for f in content["similarity_flags"]}
+    unknown_flags = sorted(flagged - set(scores))
+    if unknown_flags:
+        problems.append(f"similarity_flags 里有输入里没有的候选：{unknown_flags}")
+    t = {**THRESHOLDS, **(ctx.params.get("thresholds") or {})}
+
+    def passes(cid: str) -> bool:
+        score = scores.get(cid)
+        return bool(score) and score["total"] >= t["pass_total"] and min(score["dimensions"].values()) >= t["min_dimension"] \
+            and score["dimensions"]["consistency"] >= t["min_consistency"] and cid not in flagged
+
+    rule_text = f"总分不低于 {t['pass_total']}、每项不低于 {t['min_dimension']}、一致不低于 {t['min_consistency']}、没有相似度问题"
+    if content["verdict"] == "pass" and pick in scores and not passes(pick):
+        problems.append(f"verdict 是 pass，但 {pick} 没过线（{rule_text}）；没过线就写 revise 或 reject")
+    if content["verdict"] == "pass" and explore is not None and explore in scores and not passes(explore):
+        problems.append(f"explore_pick {explore} 也要过线（{rule_text}），不过线就写 null")
+    if content["verdict"] in {"revise", "reject"} and not content["required_changes"]:
+        problems.append(f"verdict 是 {content['verdict']} 时要写 required_changes")
+    return problems
+
+
+@rule("shot-list")
+def _shot_list(content: dict, ctx: Context) -> list[str]:
+    problems = []
+    ids = [shot["id"] for shot in content["shots"]]
+    if not ids:
+        problems.append("镜头表是空的")
+    repeated = sorted({i for i in ids if ids.count(i) > 1})
+    if repeated:
+        problems.append(f"镜头代号重复：{repeated}")
+    total = sum(shot["seconds"] for shot in content["shots"])
+    if abs(total - content["total_seconds"]) > 0.5:
+        problems.append(f"各镜头时长加起来是 {total:g} 秒，total_seconds 写的是 {content['total_seconds']:g} 秒")
+    for shot in content["shots"]:
+        if shot["seconds"] <= 0:
+            problems.append(f"{shot['id']} 的时长要大于 0")
+        if shot["generation"]["needed"] and not shot["generation"]["prompt"]:
+            problems.append(f"{shot['id']} 要生成，但没有写提示词")
+        reference = shot["generation"]["reference"]
+        if reference and (ctx.resolver is None or not ctx.resolver.has_asset(reference)):
+            problems.append(f"{shot['id']} 的参考图在固定资产里不存在：{reference}")
+    return problems
+
+
+@rule("production-plan")
+def _production_plan(content: dict, ctx: Context) -> list[str]:
+    problems = []
+    names = [a["name"] for a in content["assets"]]
+    repeated = sorted({n for n in names if names.count(n) > 1})
+    if repeated:
+        problems.append(f"资产名重复：{repeated}")
+    for asset in content["assets"]:
+        if asset["source"] == "fixed":
+            if not asset["ref"]:
+                problems.append(f"固定资产 {asset['name']} 要写 ref（固定资产/ 下的相对路径）")
+            elif ctx.resolver is None or not ctx.resolver.has_asset(asset["ref"]):
+                problems.append(f"固定资产里没有 {asset['ref']}（{asset['name']}）")
+    return problems
+
+
+@cross_rule("production-plan", "shot-list")
+def _plan_and_shots(parts: dict[str, list[dict]], ctx: Context) -> list[str]:
+    names = {a["name"] for a in parts["production-plan"][0]["assets"]}
+    used = {name for shot in parts["shot-list"][0]["shots"] for name in shot["assets"]}
+    unknown = sorted(used - names)
+    return [f"镜头表用到了制作方案里没有的资产：{unknown}"] if unknown else []

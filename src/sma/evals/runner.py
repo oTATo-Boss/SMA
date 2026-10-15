@@ -37,6 +37,9 @@ class FixtureResolver:
     def has_data(self, relative_path: str) -> bool:
         return False
 
+    def has_asset(self, relative_path: str) -> bool:
+        return False
+
 
 def eval_db() -> StateDB:
     return StateDB(user_config_dir() / "evals.db")

@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/selected-idea",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "blind_id",
+    "step",
+    "method",
+    "candidate_id",
+    "explore",
+    "candidate",
+    "review",
+    "rounds"
+  ],
+  "properties": {
+    "blind_id": {
+      "type": "string"
+    },
+    "step": {
+      "type": "string",
+      "description": "产出它的创意步骤"
+    },
+    "method": {
+      "type": "string"
+    },
+    "candidate_id": {
+      "type": "string",
+      "description": "原来的候选代号"
+    },
+    "explore": {
+      "type": "boolean",
+      "description": "这次做的是不是探索名额"
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "one_liner",
+        "hook",
+        "beats",
+        "payoff",
+        "why",
+        "evidence_refs",
+        "borrowed_mechanism",
+        "difference_from_source",
+        "feasibility"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "候选代号，例如 A1"
+        },
+        "one_liner": {
+          "type": "string",
+          "description": "一句话创意"
+        },
+        "hook": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "visual",
+            "line"
+          ],
+          "properties": {
+            "visual": {
+              "type": "string",
+              "description": "前 3 秒的画面"
+            },
+            "line": {
+              "type": "string",
+              "description": "前 3 秒的台词或字幕"
+            }
+          }
+        },
+        "beats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "节拍，按时间顺序"
+        },
+        "payoff": {
+          "type": "string",
+          "description": "结尾回报"
+        },
+        "why": {
+          "type": "string",
+          "description": "为什么会火，引用证据"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "依据，只能是：lib:<爆款条目的 key>；输入里出现过的公开链接；data:<本人资料路径>（只用任务里“本人提供的资料”列出的文件）。定位、规则和 inputs/ 里的文件说明的是账号，不是依据"
+        },
+        "borrowed_mechanism": {
+          "type": "string",
+          "description": "借的是什么机制"
+        },
+        "difference_from_source": {
+          "type": "string",
+          "description": "和原作差在哪"
+        },
+        "feasibility": {
+          "type": "string",
+          "description": "制作可行性：镜头数、哪些要生成、难点"
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verdict",
+        "total",
+        "dimensions",
+        "risks",
+        "required_changes",
+        "summary"
+      ],
+      "properties": {
+        "verdict": {
+          "enum": [
+            "pass",
+            "revise",
+            "reject"
+          ]
+        },
+        "total": {
+          "type": "integer"
+        },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "evidence",
+            "hook",
+            "clarity",
+            "payoff",
+            "novelty",
+            "consistency",
+            "feasibility"
+          ],
+          "properties": {
+            "evidence": {
+              "enum": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "description": "证据：为什么会火有没有真实的爆款或数据支持，引用是否属实"
+            },
+            "hook": {
+              "enum": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "description": "钩子：前 3 秒有没有让目标观众停下来的画面或问题"
+            },
+            "clarity": {
+              "enum": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "description": "清晰：不看后文、不懂设定也能看懂发生了什么"
+            },
+            "payoff": {
+              "enum": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "description": "回报：结尾有没有兑现反转、笑点、情绪或结果"
+            },
+            "novelty": {
+              "enum": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "description": "新颖：和原作、和赛道里常见内容的差别够不够"
+            },
+            "consistency": {
+              "enum": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "description": "一致：符合定位，角色、人设、风格没有被换掉"
+            },
+            "feasibility": {
+              "enum": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "description": "可行：用现有工具做得出来，生成难点可控"
+            }
+          },
+          "description": "7 项分数，各 0–5"
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "required_changes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    },
+    "rounds": {
+      "type": "integer",
+      "description": "经过了几轮评审"
+    }
+  },
+  "description": "选定的创意：编排层按评审结论选出，交给导演"
+}

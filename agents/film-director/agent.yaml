@@ -1,0 +1,30 @@
+id: film-director
+name: 导演
+version: 0.1.0
+description: 把选定的创意变成制作方案和逐镜头的镜头表，需要生成的镜头写好提示词
+kind: worker
+inputs:
+  - { type: strategy, required: true }
+  - { type: account, required: true }
+  - { type: assets, required: false }
+  - { type: selected-idea, required: true }
+outputs:
+  - { type: production-plan }
+  - { type: shot-list }
+engine:
+  prefer: [codex]
+model:
+  family: any
+  tier: strong
+reasoning: high
+sandbox: read-only
+network: none
+skills:
+  - { name: direct-video, required: false }
+  - { name: ai-video-prompt, required: false }
+  - { name: huashu-art-motion, required: false }
+knowledge:
+  - knowledge/制作约束.md
+memory:
+  read: true
+limits: { timeout_s: 1200, max_attempts: 3, max_output_kb: 128 }

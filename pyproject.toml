@@ -14,6 +14,9 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.9"]
+research = [
+    "playwright>=1.48",
+]
 
 [project.scripts]
 sma = "sma.cli.main:app"

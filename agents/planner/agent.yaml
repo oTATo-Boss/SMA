@@ -1,0 +1,21 @@
+id: planner
+name: 规划
+version: 0.1.0
+description: 读懂一句话任务：判断是不是内容任务，为这次运行挑研究方向和 3 种创意方法；调整方向的任务先复述，不进创意流程
+kind: planner
+inputs:
+  - { type: strategy, required: true }
+  - { type: recent-runs, required: false }
+outputs:
+  - { type: run-plan }
+engine:
+  prefer: [codex]
+model:
+  family: any
+  tier: standard
+reasoning: medium
+sandbox: read-only
+network: none
+memory:
+  read: false
+limits: { timeout_s: 600, max_attempts: 3, max_output_kb: 32 }

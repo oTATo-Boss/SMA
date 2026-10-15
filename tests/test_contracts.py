@@ -159,3 +159,91 @@ def test_evidence_problems_name_the_candidate_once():
     problems = validate_output(IDEATION, output, Context(params={"method": "original"}, resolver=Resolver()))
     evidence = [p for p in problems if p.startswith("[证据]")]
     assert len(evidence) == 3 and "idea-candidates[0].candidates[1]" in evidence[1]
+
+
+def _review(verdict="pass", pick_score=5, flags=()):
+    dims = ["evidence", "hook", "clarity", "payoff", "novelty", "consistency", "feasibility"]
+    scores = []
+    for cid, value in [("X1", pick_score), ("X2", 3)]:
+        d = dict.fromkeys(dims, value)
+        scores.append({"candidate": cid, "dimensions": d, "reasons": dict.fromkeys(dims, "理由"), "total": sum(d.values()), "risks": []})
+    return {"blind": True, "scores": scores, "pick": "X1", "explore_pick": None, "verdict": verdict,
+            "required_changes": [] if verdict == "pass" else ["改钩子"], "similarity_flags": list(flags), "summary": "总结"}
+
+
+def test_idea_review_rules():
+    inputs = {"blinded-candidates": [{"candidates": [{"id": "X1"}, {"id": "X2"}]}]}
+    ctx = lambda: Context(inputs=inputs)  # noqa: E731
+    assert validate_content("idea-review", _review(), ctx()) == []
+    low = _review(pick_score=3)
+    assert any("没过线" in p for p in validate_content("idea-review", low, ctx()))
+    flagged = _review(flags=[{"candidate": "X1", "source": "lib:x", "what": "照搬角色"}])
+    assert any("没过线" in p for p in validate_content("idea-review", flagged, ctx()))
+    missing = _review()
+    missing["scores"] = missing["scores"][:1]
+    assert any("没有打分" in p for p in validate_content("idea-review", missing, ctx()))
+    wrong_total = _review()
+    wrong_total["scores"][0]["total"] = 1
+    assert any("7 项之和" in p for p in validate_content("idea-review", wrong_total, ctx()))
+    no_changes = _review("revise")
+    no_changes["required_changes"] = []
+    assert any("required_changes" in p for p in validate_content("idea-review", no_changes, ctx()))
+    strict = Context(inputs=inputs, params={"thresholds": {"pass_total": 36}})
+    assert any("没过线" in p for p in validate_content("idea-review", _review(), strict))
+
+
+def test_run_plan_rules():
+    choices = {"research_lanes": {"min": 1, "max": 2, "default": ["a"], "values": [{"id": "a"}, {"id": "b"}]},
+               "ideation_methods": {"min": 3, "max": 3, "default": ["m1", "m2", "m3"], "values": [{"id": f"m{i}"} for i in range(1, 5)]}}
+    plan = {"intent": "content", "intent_reason": "r", "research_lanes": [{"id": "a", "focus": "f"}], "ideation_methods": ["m1", "m2", "m4"],
+            "restatement": None, "notes": ""}
+    ctx = Context(params={"choices": choices})
+    assert validate_content("run-plan", plan, ctx) == []
+    bad = {**plan, "research_lanes": [{"id": "zzz", "focus": "f"}], "ideation_methods": ["m1", "m1"]}
+    problems = validate_content("run-plan", bad, ctx)
+    assert any("不在可选范围" in p for p in problems) and any("3 到 3" in p for p in problems)
+    change = {**plan, "intent": "direction-change", "restatement": None}
+    assert any("restatement" in p for p in validate_content("run-plan", change, ctx))
+
+
+def test_shot_list_and_plan_rules(tmp_path):
+    class Assets(Resolver):
+        def has_asset(self, rel):
+            return rel == "阿福/正面.png"
+
+    plan = {"idea": "i", "experience": {"first_second": "a", "third_second": "b", "turn": "c", "payoff": "d"}, "style": "s",
+            "assets": [{"name": "阿福", "source": "fixed", "ref": "阿福/正面.png", "notes": ""}], "sound": "s", "risks": []}
+    shots = {"total_seconds": 10, "shots": [
+        {"id": "S1", "seconds": 4, "visual": "v", "action": "a", "camera": "c", "audio": "a", "text": "", "assets": ["阿福"],
+         "generation": {"needed": True, "prompt": "p", "reference": "阿福/正面.png"}},
+        {"id": "S2", "seconds": 6, "visual": "v", "action": "a", "camera": "c", "audio": "a", "text": "", "assets": ["阿福"],
+         "generation": {"needed": False, "prompt": None, "reference": None}}]}
+    specs = [OutputSpec("production-plan"), OutputSpec("shot-list")]
+    ok = validate_output(specs, {"production_plan": plan, "shot_list": shots}, Context(resolver=Assets()))
+    assert ok == []
+    shots_bad = json.loads(json.dumps(shots))
+    shots_bad["total_seconds"] = 20
+    shots_bad["shots"][1]["id"] = "S1"
+    shots_bad["shots"][0]["assets"] = ["不存在的资产"]
+    shots_bad["shots"][0]["generation"]["prompt"] = None
+    problems = validate_output(specs, {"production_plan": plan, "shot_list": shots_bad}, Context(resolver=Assets()))
+    assert any("加起来" in p for p in problems) and any("重复" in p for p in problems)
+    assert any("没有写提示词" in p for p in problems) and any("制作方案里没有的资产" in p for p in problems)
+    plan_bad = {**plan, "assets": [{"name": "阿福", "source": "fixed", "ref": "没有.png", "notes": ""}]}
+    assert any("固定资产里没有" in p for p in validate_content("production-plan", plan_bad, Context(resolver=Assets())))
+
+
+def test_viral_reference_checked_against_ledger():
+    ref = viral_ref("r1", "https://www.xiaohongshu.com/explore/66aa77bb88cc99dd00ee11ff")
+    ref["evidence_ids"] = ["ev-1"]
+    ref["metrics"] = [{"name": "点赞", "value_text": "1.2万", "value_number": 12000}]
+    ledger = {"ev-1": {"tool": "post_detail", "url": "https://www.xiaohongshu.com/explore/66aa77bb88cc99dd00ee11ff?xsec_token=t",
+                       "metrics": {"点赞": 12000}}}
+    assert validate_content("viral-reference", ref, Context(ledger=ledger)) == []
+    wrong = {**ref, "metrics": [{"name": "点赞", "value_text": "2万", "value_number": 20000}], "media_reviewed": True}
+    problems = validate_content("viral-reference", wrong, Context(ledger=ledger))
+    assert any("台账里是" in p for p in problems) and any("播放截图" in p for p in problems)
+    played = {**ledger, "ev-2": {"tool": "playback_frames", "url": ref["url"], "frames": ["f1.png"]}}
+    assert validate_content("viral-reference", {**ref, "media_reviewed": True, "evidence_ids": ["ev-1", "ev-2"]}, Context(ledger=played)) == []
+    assert any("evidence_ids" in p for p in validate_content("viral-reference", {**ref, "evidence_ids": []}, Context(ledger=ledger)))
+    assert validate_content("viral-reference", {**ref, "evidence_ids": []}, Context()) == []    # 没用研究工具时不查台账

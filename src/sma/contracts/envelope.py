@@ -8,6 +8,12 @@ from sma.contracts.validate import collect_refs
 from sma.timeutil import stamp
 
 SCHEMA_VERSION = 1
+# 各产物 Schema 的版本：不兼容的改动才升（设计 02 第 7 节）
+SCHEMA_VERSIONS = {"viral-reference": 2}
+
+
+def schema_version(artifact_type: str) -> int:
+    return SCHEMA_VERSIONS.get(artifact_type, SCHEMA_VERSION)
 
 
 @dataclass(frozen=True)
@@ -28,7 +34,7 @@ def make_envelope(artifact_type: str, content: dict, *, run_id: str, step_id: st
     """slug 是步骤在文件系统和 id 里的写法（research[viral] → research-viral）。"""
     return {
         "artifact": artifact_type,
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": schema_version(artifact_type),
         "id": artifact_id(run_id, slug or step_id, artifact_type, index, version),
         "run_id": run_id,
         "step_id": step_id,

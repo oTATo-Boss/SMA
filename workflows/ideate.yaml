@@ -1,22 +1,48 @@
-# 一句话 → 调研 → 3 路创意（设计 03 第 9 节）。
-# M1 版本：前提检查由编排层在每次执行（含续跑）时做；规划、盲评、导演留到 M2。
+# 一句话 → 规划 → 调研 → 3 路创意 → 盲评（可返工、可重出）→ 选定 → 导演 → 依据卡（设计 03 第 9 节、docs/plans/m2.md）。
+# 前提检查由编排层在每次执行（含续跑）时做；中途不找本人确认，只在需要本人处理时阻塞。
 id: ideate
-version: 1
-description: 一句话任务：并行调研本赛道和相邻赛道，合并成机会简报，再用 3 种方法并行出创意候选
+version: 2
+description: 一句话任务：规划研究方向和创意方法，调研、出创意、盲评选定，导演出镜头表，最后写依据卡
 preconditions: [positioning_confirmed]
 
 steps:
+  plan:
+    agent: planner
+    gate: plan_intent                # 调整方向、不是内容任务的，到这里就停，交给本人
+    on_fail: { action: continue }    # 规划失败不影响运行：研究方向和创意方法用默认值
+    params:
+      choices:
+        research_lanes:
+          min: 1
+          max: 3
+          default: [viral, adjacent]
+          values:
+            - id: viral
+              name: 本赛道爆款
+              focus: 在账号定位的赛道和对标账号里，找近期明显超过作者常态的作品
+            - id: adjacent
+              name: 相邻赛道与热点
+              focus: 在相邻甚至无关的赛道、近期热点和流行模板里，找能迁移到本账号的机制
+            - id: benchmarks
+              name: 对标账号近况
+              focus: 看对标账号最近的作品和表现，找它们新试的东西
+        ideation_methods:
+          min: 3
+          max: 3
+          default: [mechanism-borrow, cross-domain, original]
+          values:
+            - { id: mechanism-borrow, name: 同赛道机制借鉴 }
+            - { id: cross-domain, name: 跨赛道迁移 }
+            - { id: trend-remix, name: 热点重组 }
+            - { id: original, name: 原创发散 }
+    inputs:
+      - { from: workspace, type: strategy }
+      - { from: workspace, type: recent-runs, required: false }
+
   research:
     agent: market-intel
-    foreach:
-      param: lane
-      values:
-        - id: viral
-          name: 本赛道爆款
-          focus: 在账号定位的赛道和对标账号里，找近期明显超过作者常态的作品
-        - id: adjacent
-          name: 相邻赛道与热点
-          focus: 在相邻甚至无关的赛道、近期热点和流行模板里，找能迁移到本账号的机制
+    needs: [plan]
+    foreach: { param: lane, from: plan.research_lanes }
     min_success: 1
     inputs:
       - { from: workspace, type: strategy }
@@ -35,13 +61,8 @@ steps:
 
   ideation:
     agent: creative-director
-    needs: [merge]
-    foreach:
-      param: method
-      values:
-        - { id: mechanism-borrow, name: 同赛道机制借鉴 }
-        - { id: cross-domain, name: 跨赛道迁移 }
-        - { id: original, name: 原创发散 }
+    needs: [plan, merge]
+    foreach: { param: method, from: plan.ideation_methods }
     params:
       candidates_range: [3, 4]
     min_success: 2
@@ -49,3 +70,76 @@ steps:
       - { from: workspace, type: strategy }
       - { from: merge, type: opportunity-brief }
       - { from: merge, type: viral-reference, required: false, select: top_by_outlier, limit: 12 }
+      - { from: review, type: idea-review, feedback: true }       # 重出一轮时：上一轮的评审意见
+
+  blind:
+    code: blind_candidates
+    needs: [ideation]
+    params:
+      rework_step: rework
+    inputs:
+      - { from: ideation, type: idea-candidates }
+      - { from: rework, type: idea-candidates, feedback: true }   # 返工后：替换被返工的那一个
+    outputs:
+      - { type: blinded-candidates }
+      - { type: blind-key }
+
+  review:
+    agent: creative-critic
+    needs: [blind, merge]
+    inputs:
+      - { from: workspace, type: strategy }
+      - { from: blind, type: blinded-candidates }
+      - { from: merge, type: opportunity-brief }
+      - { from: merge, type: viral-reference, required: false, select: top_by_outlier, limit: 12 }
+
+  select:
+    code: select_idea
+    needs: [review, blind]
+    inputs:
+      - { from: review, type: idea-review }
+      - { from: blind, type: blinded-candidates }
+      - { from: blind, type: blind-key }
+    outputs:
+      - { type: selected-idea }
+    gate: review_loop               # pass 继续；revise 返工选中的再评；reject 带着意见重出一轮
+    gate_params:
+      rework: rework
+      after_rework: blind
+      reject_from: ideation
+      max_rounds: autonomy.idea_rounds_max
+
+  rework:
+    agent: creative-director
+    routed: true
+    needs: [select, review, merge]
+    params:
+      mode: rework
+      candidates_range: [1, 1]
+    inputs:
+      - { from: workspace, type: strategy }
+      - { from: select, type: selected-idea }
+      - { from: review, type: idea-review }
+      - { from: merge, type: opportunity-brief }
+      - { from: merge, type: viral-reference, required: false, select: top_by_outlier, limit: 12 }
+
+  direct:
+    agent: film-director
+    needs: [select]
+    inputs:
+      - { from: workspace, type: strategy }
+      - { from: workspace, type: account }
+      - { from: workspace, type: assets, required: false }
+      - { from: select, type: selected-idea }
+
+  rationale:
+    code: write_rationale
+    needs: [direct, select, review, merge]
+    inputs:
+      - { from: select, type: selected-idea }
+      - { from: review, type: idea-review }
+      - { from: merge, type: viral-reference, required: false }
+      - { from: direct, type: production-plan }
+      - { from: direct, type: shot-list }
+    outputs:
+      - { type: delivery-rationale }

@@ -1,0 +1,32 @@
+id: creative-critic
+name: 创意评审
+version: 0.1.0
+description: 盲评创意候选：按 7 个维度打分、核对证据、查和原作的相似度、做失败预演，选出值得做的方案
+kind: critic
+inputs:
+  - { type: strategy, required: true }
+  - { type: blinded-candidates, required: true }
+  - { type: opportunity-brief, required: true }
+  - { type: viral-reference, required: false, many: true }
+outputs:
+  - { type: idea-review }
+engine:
+  prefer: [claude, codex]       # 和创意总监不同家族；Claude 不可用时退回 Codex，依据卡注明"同家族评审"
+model:
+  family: anthropic
+  tier: strong
+reasoning: high
+sandbox: read-only
+network: none
+skills:
+  - { name: storytelling-hooks, required: false }
+knowledge:
+  - knowledge/评分标准.md
+memory:
+  read: true
+independence:
+  differ_from: [creative-director]
+blind: [method]
+params:
+  thresholds: { pass_total: 25, min_dimension: 3, min_consistency: 4 }
+limits: { timeout_s: 1200, max_attempts: 3, max_output_kb: 128 }

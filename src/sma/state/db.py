@@ -127,6 +127,10 @@ class StateDB:
             c.execute("UPDATE runs SET status=?, blocked_reason=?, error=?, finished_at=? WHERE id=?",
                       (status, blocked_reason, error, finished, run_id))
 
+    def update_run_params(self, run_id: str, params: dict) -> None:
+        with self.tx() as c:
+            c.execute("UPDATE runs SET params=? WHERE id=?", (_dump(params), run_id))
+
     def get_run(self, run_id: str) -> dict | None:
         return _row(self.conn().execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
 

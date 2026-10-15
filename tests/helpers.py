@@ -23,6 +23,7 @@ def viral_ref(key: str, url: str, ratio: float | None = 5.0, platform: str = "�
         "viewed_at": "2026-10-15 09:30", "metrics": [{"name": "点赞", "value_text": "1.2万", "value_number": 12000}],
         "baseline": {"description": "近 12 条中位数", "median": 2400, "sample_size": 12}, "outlier_ratio": ratio,
         "media_reviewed": False, "observed": ["标题和点赞数"], "inferred": ["钩子强"], "transferable": ["预期建立 → 反转"],
+        "evidence_ids": [],
     }
 
 
@@ -63,9 +64,70 @@ def lib_keys(request: StepRequest) -> list[str]:
     return [f"lib:{item['key']}" for item in items]
 
 
+def read_input(request: StepRequest, name: str):
+    path = request.attempt_dir / "inputs" / name
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+
+def plan_output(intent: str = "content", lanes=("viral", "adjacent"), methods=("mechanism-borrow", "cross-domain", "original")) -> dict:
+    restatement = None
+    if intent == "direction-change":
+        restatement = {"keep": ["深夜便利店"], "drop": ["猫咪日常"], "add": ["职场题材"], "questions": ["阿福这个角色还保留吗？"]}
+    content = intent == "content"
+    return {"run_plan": {"intent": intent, "intent_reason": "按原话判断",
+                         "research_lanes": [{"id": lane, "focus": f"{lane} 的重点"} for lane in lanes] if content else [],
+                         "ideation_methods": list(methods) if content else [], "restatement": restatement, "notes": "说明"}}
+
+
+DIMS = ["evidence", "hook", "clarity", "payoff", "novelty", "consistency", "feasibility"]
+
+
+def review_output(request: StepRequest, verdict: str = "pass", pick_index: int = 0, explore: bool = False) -> dict:
+    ids = [c["id"] for c in read_input(request, "blind.blinded-candidates.json")["candidates"]]
+    scores = []
+    for i, cid in enumerate(ids):
+        dims = dict.fromkeys(DIMS, 5 if i == pick_index else 3)
+        if explore and i == pick_index + 1:
+            dims = dict.fromkeys(DIMS, 4)
+        scores.append({"candidate": cid, "dimensions": dims, "reasons": dict.fromkeys(DIMS, "理由"), "total": sum(dims.values()),
+                       "risks": ["可能没人看"]})
+    return {"idea_review": {"blind": True, "scores": scores, "pick": ids[pick_index],
+                            "explore_pick": ids[pick_index + 1] if explore else None, "verdict": verdict,
+                            "required_changes": [] if verdict == "pass" else ["把钩子改得更具体"], "similarity_flags": [],
+                            "summary": f"结论 {verdict}"}}
+
+
+def director_output() -> dict:
+    return {"production_plan": {"idea": "阿福的点子", "experience": {"first_second": "推门", "third_second": "怪客人", "turn": "反转",
+                                                                   "payoff": "温柔结尾"},
+                                "style": "暖黄低饱和", "assets": [{"name": "阿福", "source": "generate", "ref": None, "notes": "橘猫、圆眼镜"}],
+                                "sound": "环境声", "risks": ["手部动作"]},
+            "shot_list": {"total_seconds": 12, "shots": [
+                {"id": "S1", "seconds": 5, "visual": "阿福推门", "action": "推门", "camera": "固定", "audio": "门铃", "text": "",
+                 "assets": ["阿福"], "generation": {"needed": True, "prompt": "橘猫店长推开店门", "reference": None}},
+                {"id": "S2", "seconds": 7, "visual": "阿福递便签", "action": "递", "camera": "特写", "audio": "雨声", "text": "今晚来了位怪客人",
+                 "assets": ["阿福"], "generation": {"needed": False, "prompt": None, "reference": None}}]}}
+
+
+def selected_input(request: StepRequest) -> dict | None:
+    return read_input(request, "select.selected-idea.json")
+
+
 def default_responder(request: StepRequest, n: int) -> dict:
-    if request.label.startswith("research["):
-        return research_output(request.label[len("research["):-1])
-    if request.label.startswith("ideation["):
-        return candidates_output(method_of(request.label), lib_keys(request))
-    raise AssertionError(f"没想到的步骤：{request.label}")
+    label = request.label
+    if label == "plan":
+        return plan_output()
+    if label.startswith("research["):
+        return research_output(label[len("research["):-1])
+    if label.startswith("ideation["):
+        return candidates_output(method_of(label), lib_keys(request))
+    if label == "review":
+        return review_output(request)
+    if label == "rework":
+        selected = selected_input(request)
+        revised = candidates_output(selected["method"], selected["candidate"]["evidence_refs"], count=1)
+        revised["idea_candidates"]["candidates"][0].update(id=selected["candidate_id"], one_liner="阿福返工后的点子")
+        return revised
+    if label == "direct":
+        return director_output()
+    raise AssertionError(f"没想到的步骤：{label}")

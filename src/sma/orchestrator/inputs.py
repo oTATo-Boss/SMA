@@ -68,7 +68,25 @@ def describe_input(artifact_type: str, source: str, items: list[dict], ordered: 
     return text
 
 
-def _workspace(ws: Workspace, spec: InputSpec, collected: StepInputs) -> None:
+def _json_file(name: str, description: str, data) -> InputFile:
+    return InputFile(name, description, json.dumps(data, ensure_ascii=False, indent=1))
+
+
+def recent_runs(ws: Workspace, current: str, limit: int = 6) -> list[dict]:
+    """最近几次运行的任务和选中的方案（规划用来避免重复）。"""
+    out = []
+    for run in ws.db.list_runs(limit + 1):
+        if run["id"] == current:
+            continue
+        pick = None
+        for record in ws.db.artifacts(run["id"], artifact_type="selected-idea"):
+            content = json.loads((ws.root / record["path"]).read_text(encoding="utf-8"))["content"]
+            pick = {"one_liner": content["candidate"]["one_liner"], "method": content["method"]}
+        out.append({"run": run["id"], "at": run["created_at"], "task": run["task"], "status": run["status"], "pick": pick})
+    return out[:limit]
+
+
+def _workspace(ws: Workspace, spec: InputSpec, collected: StepInputs, run_id: str = "") -> None:
     if spec.type == "strategy":
         found = [(rel, label) for rel, label in STRATEGY_FILES if (ws.root / rel).is_file()]
         if spec.required and not (ws.root / STRATEGY_FILES[0][0]).is_file():
@@ -84,6 +102,18 @@ def _workspace(ws: Workspace, spec: InputSpec, collected: StepInputs) -> None:
                                              [{"ref": "workspace:library/benchmarks.json", "sha256": sha256_file(path)}]))
         elif spec.required:
             raise StepError("缺少对标库 library/benchmarks.json")
+    elif spec.type == "recent-runs":
+        collected.files.append(_json_file("recent-runs.json", "最近几次运行的任务和选中的方案", recent_runs(ws, run_id)))
+    elif spec.type == "account":
+        config = ws.config
+        collected.files.append(_json_file("account.json", "账号的平台、启用的制作路线、交付规格",
+                                          {"name": config.account.name, "platforms": config.account.platforms,
+                                           "routes": config.routes, "deliverables": config.deliverables}))
+    elif spec.type == "assets":
+        base = ws.root / "固定资产"
+        files = sorted(p for p in base.rglob("*") if p.is_file() and not p.name.startswith(".")) if base.is_dir() else []
+        listing = [{"path": p.relative_to(base).as_posix(), "bytes": p.stat().st_size} for p in files[:200]]
+        collected.files.append(_json_file("assets.json", "固定资产清单（固定资产/ 下的相对路径）", listing))
     elif spec.type == "data-files":
         data = ws.root / "data"
         files = sorted(p for p in data.rglob("*") if p.is_file() and not any(part.startswith(".") for part in p.relative_to(data).parts))
@@ -96,14 +126,16 @@ def _workspace(ws: Workspace, spec: InputSpec, collected: StepInputs) -> None:
                 collected.refs.append({"ref": f"workspace:data/{rel}", "sha256": sha256_file(path)})
 
 
-def gather(ws: Workspace, run_id: str, workflow: Workflow, instance: Instance, sources: dict[str, list[str]]) -> StepInputs:
-    """sources：每个上游基础步骤已成功的实例 id。"""
+def gather(ws: Workspace, run_id: str, workflow: Workflow, instance: Instance, sources: dict[str, list[str]],
+           all_ids: dict[str, list[str]] | None = None) -> StepInputs:
+    """sources：每个上游基础步骤已成功的实例 id；all_ids：每个步骤当前的全部实例 id（feedback 输入用）。"""
     collected = StepInputs()
     for spec in workflow.steps[instance.step].inputs:
         if spec.source == "workspace":
-            _workspace(ws, spec, collected)
+            _workspace(ws, spec, collected, run_id)
             continue
-        items = _select(load_artifacts(ws, run_id, sources.get(spec.source, []), spec.type), spec)
+        ids = (all_ids or {}).get(spec.source, []) if spec.feedback else sources.get(spec.source, [])
+        items = _select(load_artifacts(ws, run_id, ids, spec.type), spec)
         if not items:
             if spec.required:
                 raise StepError(f"缺少必需的输入：{spec.source} 的 {spec.type}")

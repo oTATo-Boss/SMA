@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/run-plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "intent",
+    "intent_reason",
+    "research_lanes",
+    "ideation_methods",
+    "restatement",
+    "notes"
+  ],
+  "properties": {
+    "intent": {
+      "enum": [
+        "content",
+        "direction-change",
+        "other"
+      ],
+      "description": "content：要做内容；direction-change：要调整账号的方向、定位、目标或核心资产（角色、人设、风格、粉丝群）；other：不是内容任务，例如提问"
+    },
+    "intent_reason": {
+      "type": "string",
+      "description": "为什么这样判断，引用任务原话"
+    },
+    "research_lanes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "focus"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "从可选研究方向里选的 id"
+          },
+          "focus": {
+            "type": "string",
+            "description": "这次这一路重点找什么，结合任务原话写具体"
+          }
+        }
+      },
+      "description": "intent 为 content 时从可选研究方向里选；否则写空列表"
+    },
+    "ideation_methods": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "intent 为 content 时从可选创意方法里选；否则写空列表"
+    },
+    "restatement": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "keep",
+            "drop",
+            "add",
+            "questions"
+          ],
+          "properties": {
+            "keep": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "保留什么"
+            },
+            "drop": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "放弃什么"
+            },
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "新增什么"
+            },
+            "questions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "要本人确认的问题；原话有两种理解的、核心资产要不要保留的，单独写成选择题"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "intent 为 direction-change 时按 保留／放弃／新增 复述原话；其他情况写 null"
+    },
+    "notes": {
+      "type": "string",
+      "description": "其他说明：为什么这样选方向和方法；intent 为 other 时写给本人的建议"
+    }
+  },
+  "description": "本次运行的计划：任务类型、研究方向、创意方法"
+}

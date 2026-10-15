@@ -19,7 +19,9 @@
         "needs-authorization",
         "rounds-exhausted",
         "compliance-doubt",
-        "step-failed"
+        "step-failed",
+        "direction-change",
+        "not-content-task"
       ]
     },
     "done": {

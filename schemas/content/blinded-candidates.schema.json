@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/blinded-candidates",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "candidates"
+  ],
+  "properties": {
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "one_liner",
+          "hook",
+          "beats",
+          "payoff",
+          "why",
+          "evidence_refs",
+          "borrowed_mechanism",
+          "difference_from_source",
+          "feasibility"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "候选代号，例如 A1"
+          },
+          "one_liner": {
+            "type": "string",
+            "description": "一句话创意"
+          },
+          "hook": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "visual",
+              "line"
+            ],
+            "properties": {
+              "visual": {
+                "type": "string",
+                "description": "前 3 秒的画面"
+              },
+              "line": {
+                "type": "string",
+                "description": "前 3 秒的台词或字幕"
+              }
+            }
+          },
+          "beats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "节拍，按时间顺序"
+          },
+          "payoff": {
+            "type": "string",
+            "description": "结尾回报"
+          },
+          "why": {
+            "type": "string",
+            "description": "为什么会火，引用证据"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "依据，只能是：lib:<爆款条目的 key>；输入里出现过的公开链接；data:<本人资料路径>（只用任务里“本人提供的资料”列出的文件）。定位、规则和 inputs/ 里的文件说明的是账号，不是依据"
+          },
+          "borrowed_mechanism": {
+            "type": "string",
+            "description": "借的是什么机制"
+          },
+          "difference_from_source": {
+            "type": "string",
+            "description": "和原作差在哪"
+          },
+          "feasibility": {
+            "type": "string",
+            "description": "制作可行性：镜头数、哪些要生成、难点"
+          }
+        }
+      },
+      "description": "合并后的全部候选，代号已重编（X1、X2……），去掉了方法标签"
+    }
+  },
+  "description": "盲化后的创意候选：编排层生成，给创意评审"
+}

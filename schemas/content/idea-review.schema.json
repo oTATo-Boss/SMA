@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/idea-review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "blind",
+    "scores",
+    "pick",
+    "explore_pick",
+    "verdict",
+    "required_changes",
+    "similarity_flags",
+    "summary"
+  ],
+  "properties": {
+    "blind": {
+      "type": "boolean",
+      "description": "盲评写 true：没有看到、也没有去猜候选来自哪种方法"
+    },
+    "scores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate",
+          "dimensions",
+          "reasons",
+          "total",
+          "risks"
+        ],
+        "properties": {
+          "candidate": {
+            "type": "string",
+            "description": "候选代号"
+          },
+          "dimensions": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "evidence",
+              "hook",
+              "clarity",
+              "payoff",
+              "novelty",
+              "consistency",
+              "feasibility"
+            ],
+            "properties": {
+              "evidence": {
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ],
+                "description": "证据：为什么会火有没有真实的爆款或数据支持，引用是否属实"
+              },
+              "hook": {
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ],
+                "description": "钩子：前 3 秒有没有让目标观众停下来的画面或问题"
+              },
+              "clarity": {
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ],
+                "description": "清晰：不看后文、不懂设定也能看懂发生了什么"
+              },
+              "payoff": {
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ],
+                "description": "回报：结尾有没有兑现反转、笑点、情绪或结果"
+              },
+              "novelty": {
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ],
+                "description": "新颖：和原作、和赛道里常见内容的差别够不够"
+              },
+              "consistency": {
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ],
+                "description": "一致：符合定位，角色、人设、风格没有被换掉"
+              },
+              "feasibility": {
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ],
+                "description": "可行：用现有工具做得出来，生成难点可控"
+              }
+            },
+            "description": "7 项分数，各 0–5"
+          },
+          "reasons": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "evidence",
+              "hook",
+              "clarity",
+              "payoff",
+              "novelty",
+              "consistency",
+              "feasibility"
+            ],
+            "properties": {
+              "evidence": {
+                "type": "string"
+              },
+              "hook": {
+                "type": "string"
+              },
+              "clarity": {
+                "type": "string"
+              },
+              "payoff": {
+                "type": "string"
+              },
+              "novelty": {
+                "type": "string"
+              },
+              "consistency": {
+                "type": "string"
+              },
+              "feasibility": {
+                "type": "string"
+              }
+            },
+            "description": "每项一句理由"
+          },
+          "total": {
+            "type": "integer",
+            "description": "7 项分数之和"
+          },
+          "risks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "失败预演：假设发出去没人看，最可能的原因；引用不实也写在这里"
+          }
+        }
+      },
+      "description": "每个候选都要打分"
+    },
+    "pick": {
+      "type": "string",
+      "description": "选中的候选代号"
+    },
+    "explore_pick": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "可选：另一个过线、但更新颖的候选；没有写 null"
+    },
+    "verdict": {
+      "enum": [
+        "pass",
+        "revise",
+        "reject"
+      ],
+      "description": "pass：选中的可以做；revise：选中的改了再做；reject：都不行"
+    },
+    "required_changes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "revise 时写选中的候选必须改的地方；reject 时写缺什么、下一轮怎么出；pass 时可以为空"
+    },
+    "similarity_flags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate",
+          "source",
+          "what"
+        ],
+        "properties": {
+          "candidate": {
+            "type": "string",
+            "description": "候选代号"
+          },
+          "source": {
+            "type": "string",
+            "description": "和哪条作品像：lib:<key> 或链接"
+          },
+          "what": {
+            "type": "string",
+            "description": "哪里雷同：画面、角色、台词、文案"
+          }
+        }
+      },
+      "description": "和借鉴的原作雷同的地方；没有写空列表"
+    },
+    "summary": {
+      "type": "string",
+      "description": "三句话以内：选了哪个、为什么、要改什么"
+    }
+  },
+  "description": "盲评结果"
+}

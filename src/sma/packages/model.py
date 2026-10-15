@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 # 不是产物、由编排层从账号工作区取的输入类型
-WORKSPACE_INPUTS = {"strategy", "benchmarks", "data-files"}
+WORKSPACE_INPUTS = {"strategy", "benchmarks", "data-files", "recent-runs", "account", "assets"}
 
 
 class _Strict(BaseModel):
@@ -72,4 +72,5 @@ class AgentPackage(_Strict):
     memory: MemorySpec = Field(default_factory=MemorySpec)
     independence: Independence = Field(default_factory=Independence)
     blind: list[str] = Field(default_factory=list)
+    params: dict = Field(default_factory=dict)          # 固定参数：写进任务正文，也给语义规则用（例如评审的过线阈值）
     limits: Limits = Field(default_factory=Limits)

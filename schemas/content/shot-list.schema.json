@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sma:content/shot-list",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "total_seconds",
+    "shots"
+  ],
+  "properties": {
+    "total_seconds": {
+      "type": "number",
+      "description": "总时长（秒），等于各镜头时长之和"
+    },
+    "shots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "seconds",
+          "visual",
+          "action",
+          "camera",
+          "audio",
+          "text",
+          "assets",
+          "generation"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "镜头代号，例如 S1"
+          },
+          "seconds": {
+            "type": "number",
+            "description": "时长（秒）"
+          },
+          "visual": {
+            "type": "string",
+            "description": "画面"
+          },
+          "action": {
+            "type": "string",
+            "description": "动作"
+          },
+          "camera": {
+            "type": "string",
+            "description": "机位和运动"
+          },
+          "audio": {
+            "type": "string",
+            "description": "声音"
+          },
+          "text": {
+            "type": "string",
+            "description": "画面上的字幕或文字，没有写空字符串"
+          },
+          "assets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "用到的资产名，对应制作方案 assets 的 name"
+          },
+          "generation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "needed",
+              "prompt",
+              "reference"
+            ],
+            "properties": {
+              "needed": {
+                "type": "boolean",
+                "description": "这个镜头要不要生成"
+              },
+              "prompt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "要生成时写提示词，否则写 null"
+              },
+              "reference": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "参考图：固定资产/ 下的相对路径；没有写 null"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "description": "逐镜头方案"
+}

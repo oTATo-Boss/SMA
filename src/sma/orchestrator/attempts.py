@@ -50,6 +50,7 @@ class StepJob:
     resolver: EvidenceResolver | None
     run_label: str
     extra_checks: Callable[[dict], list[str]] | None = None
+    rule_inputs: dict[str, list[dict]] = field(default_factory=dict)    # 上游产物：类型 → 内容，给语义规则核对
 
 
 @dataclass
@@ -74,8 +75,9 @@ def add_usage(total: dict, usage: dict | None) -> dict:
     return total
 
 
-def check_output(package: Package, output: dict, rule_params: dict, resolver: EvidenceResolver | None) -> list[str]:
-    problems = validate_output(package.output_specs, output, Context(params=rule_params, resolver=resolver))
+def check_output(package: Package, output: dict, rule_params: dict, resolver: EvidenceResolver | None,
+                 inputs: dict[str, list[dict]] | None = None) -> list[str]:
+    problems = validate_output(package.output_specs, output, Context(params=rule_params, resolver=resolver, inputs=inputs or {}))
     size = len(json.dumps(output, ensure_ascii=False).encode("utf-8"))
     if size > package.spec.limits.max_output_kb * 1024:
         problems.append(f"[大小] 输出 {size // 1024} KB，超过上限 {package.spec.limits.max_output_kb} KB")
@@ -154,7 +156,7 @@ def run_attempts(job: StepJob, *, cancel: threading.Event, secrets: dict[str, st
             finish(log)
             last_error, last_kind = f"{result.status}：{log.detail}", "engine"
             continue
-        problems = check_output(job.package, result.output, job.rule_params, job.resolver)
+        problems = check_output(job.package, result.output, job.rule_params, job.resolver, job.rule_inputs)
         problems += seen_problems(job, result.output, result.seen_text)
         if job.extra_checks:
             problems += job.extra_checks(result.output)

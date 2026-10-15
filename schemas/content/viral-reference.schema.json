@@ -17,7 +17,8 @@
     "media_reviewed",
     "observed",
     "inferred",
-    "transferable"
+    "transferable",
+    "evidence_ids"
   ],
   "properties": {
     "key": {
@@ -140,6 +141,13 @@
         "type": "string"
       },
       "description": "能迁移到新作品的方法，停在机制层面"
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "研究工具的台账编号（ev-…），这条的链接、指标、截图都要能在台账里找到；只用网页搜索时写空列表"
     }
   },
   "description": "一条爆款的证据和拆解"
